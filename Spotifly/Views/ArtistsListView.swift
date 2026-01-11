@@ -78,7 +78,7 @@ struct ArtistsListView: View {
                 .padding()
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 0) {
                         // Back button when navigated from another section
                         if let backTitle = navigationCoordinator.previousSectionTitle {
                             Button {
@@ -130,18 +130,25 @@ struct ArtistsListView: View {
                         }
 
                         // User's library artists
-                        ForEach(store.userArtists) { artist in
-                            ArtistRow(
-                                artist: artist,
-                                playbackViewModel: playbackViewModel,
-                                isSelected: selectedArtistId == artist.id,
-                                onSelect: {
-                                    // Clear ephemeral state when user selects a library artist
-                                    navigationCoordinator.viewingArtistId = nil
-                                    navigationCoordinator.clearSectionHistory()
-                                    selectedArtistId = artist.id
-                                },
-                            )
+                        ForEach(Array(store.userArtists.enumerated()), id: \.element.id) { index, artist in
+                            VStack(spacing: 0) {
+                                ArtistRow(
+                                    artist: artist,
+                                    playbackViewModel: playbackViewModel,
+                                    isSelected: selectedArtistId == artist.id,
+                                    onSelect: {
+                                        // Clear ephemeral state when user selects a library artist
+                                        navigationCoordinator.viewingArtistId = nil
+                                        navigationCoordinator.clearSectionHistory()
+                                        selectedArtistId = artist.id
+                                    },
+                                )
+
+                                if index < store.userArtists.count - 1 {
+                                    Divider()
+                                        .padding(.leading, 56)
+                                }
+                            }
                         }
 
                         // Load more indicator
@@ -217,88 +224,75 @@ struct ArtistRow: View {
     let onSelect: () -> Void
 
     @Environment(SpotifySession.self) private var session
+    @State private var isHovering = false
+
+    private let imageSize: CGFloat = 36
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Artist image
+        HStack(spacing: 10) {
+            // Artist image (circular)
             if let imageURL = artist.imageURL {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
                     case .empty:
-                        ProgressView()
-                            .frame(width: 60, height: 60)
+                        artistPlaceholder
                     case let .success(image):
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(width: 60, height: 60)
+                            .frame(width: imageSize, height: imageSize)
                             .clipShape(Circle())
                     case .failure:
-                        Image(systemName: "person.circle")
-                            .font(.system(size: 60))
-                            .foregroundStyle(.gray.opacity(0.5))
+                        artistPlaceholder
                     @unknown default:
                         EmptyView()
                     }
                 }
             } else {
-                Image(systemName: "person.circle")
-                    .font(.system(size: 60))
-                    .foregroundStyle(.gray.opacity(0.5))
+                artistPlaceholder
             }
 
-            // Artist info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(artist.name)
-                    .font(.headline)
-                    .lineLimit(1)
-
-                if !artist.genres.isEmpty {
-                    Text(artist.genres.prefix(2).joined(separator: ", "))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                if let followers = artist.followers {
-                    Text(String(format: String(localized: "metadata.followers"), formatFollowers(followers)))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            // Artist name
+            Text(artist.name)
+                .font(.system(size: 13))
+                .lineLimit(1)
 
             Spacer()
 
-            // Play button
-            Button {
-                Task {
-                    let token = await session.validAccessToken()
-                    await playbackViewModel.play(uriOrUrl: artist.uri, accessToken: token)
+            // Play button (on hover)
+            if isHovering {
+                Button {
+                    Task {
+                        let token = await session.validAccessToken()
+                        await playbackViewModel.play(uriOrUrl: artist.uri, accessToken: token)
+                    }
+                } label: {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.green)
                 }
-            } label: {
-                Image(systemName: "play.circle.fill")
-                    .font(.title)
-                    .foregroundStyle(.green)
+                .buttonStyle(.plain)
+                .disabled(playbackViewModel.isLoading)
             }
-            .buttonStyle(.plain)
-            .disabled(playbackViewModel.isLoading)
         }
-        .padding()
-        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.gray.opacity(0.05))
-        .cornerRadius(8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
         .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovering = hovering
+        }
         .onTapGesture {
             onSelect()
         }
     }
 
-    private func formatFollowers(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            String(format: "%.1fM", Double(count) / 1_000_000.0)
-        } else if count >= 1000 {
-            String(format: "%.1fK", Double(count) / 1000.0)
-        } else {
-            "\(count)"
-        }
+    private var artistPlaceholder: some View {
+        Image(systemName: "person.fill")
+            .font(.system(size: 16))
+            .foregroundStyle(.secondary)
+            .frame(width: imageSize, height: imageSize)
+            .background(Color.gray.opacity(0.15))
+            .clipShape(Circle())
     }
 }

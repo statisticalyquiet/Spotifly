@@ -21,8 +21,8 @@ final class ArtistService {
 
     /// Load user's followed artists
     func loadUserArtists(accessToken: String, forceRefresh: Bool = false) async throws {
-        // Skip if already loaded and not forcing refresh
-        if store.artistsPagination.isLoaded, !forceRefresh, !store.artistsPagination.hasMore {
+        // Skip if already loaded and not forcing refresh (but only if we actually have data)
+        if store.artistsPagination.isLoaded, !forceRefresh, !store.artistsPagination.hasMore, !store.userArtistIds.isEmpty {
             return
         }
 

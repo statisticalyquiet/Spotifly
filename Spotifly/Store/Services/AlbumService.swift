@@ -22,8 +22,8 @@ final class AlbumService {
 
     /// Load user's saved albums
     func loadUserAlbums(accessToken: String, forceRefresh: Bool = false) async throws {
-        // Skip if already loaded and not forcing refresh
-        if store.albumsPagination.isLoaded, !forceRefresh, !store.albumsPagination.hasMore {
+        // Skip if already loaded and not forcing refresh (but only if we actually have data)
+        if store.albumsPagination.isLoaded, !forceRefresh, !store.albumsPagination.hasMore, !store.userAlbumIds.isEmpty {
             return
         }
 

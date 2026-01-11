@@ -78,7 +78,7 @@ struct AlbumsListView: View {
                 .padding()
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 0) {
                         // Back button when navigated from another section
                         if let backTitle = navigationCoordinator.previousSectionTitle {
                             Button {
@@ -130,18 +130,25 @@ struct AlbumsListView: View {
                         }
 
                         // User's library albums
-                        ForEach(store.userAlbums) { album in
-                            AlbumRow(
-                                album: album,
-                                playbackViewModel: playbackViewModel,
-                                isSelected: selectedAlbumId == album.id,
-                                onSelect: {
-                                    // Clear ephemeral state when user selects a library album
-                                    navigationCoordinator.viewingAlbumId = nil
-                                    navigationCoordinator.clearSectionHistory()
-                                    selectedAlbumId = album.id
-                                },
-                            )
+                        ForEach(Array(store.userAlbums.enumerated()), id: \.element.id) { index, album in
+                            VStack(spacing: 0) {
+                                AlbumRow(
+                                    album: album,
+                                    playbackViewModel: playbackViewModel,
+                                    isSelected: selectedAlbumId == album.id,
+                                    onSelect: {
+                                        // Clear ephemeral state when user selects a library album
+                                        navigationCoordinator.viewingAlbumId = nil
+                                        navigationCoordinator.clearSectionHistory()
+                                        selectedAlbumId = album.id
+                                    },
+                                )
+
+                                if index < store.userAlbums.count - 1 {
+                                    Divider()
+                                        .padding(.leading, 56)
+                                }
+                            }
                         }
 
                         // Load more indicator
@@ -217,107 +224,75 @@ struct AlbumRow: View {
     let onSelect: () -> Void
 
     @Environment(SpotifySession.self) private var session
+    @State private var isHovering = false
+
+    private let imageSize: CGFloat = 36
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             // Album cover
             if let imageURL = album.imageURL {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
                     case .empty:
-                        ProgressView()
-                            .frame(width: 60, height: 60)
+                        albumPlaceholder
                     case let .success(image):
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(width: 60, height: 60)
-                            .cornerRadius(6)
+                            .frame(width: imageSize, height: imageSize)
+                            .cornerRadius(4)
                     case .failure:
-                        Image(systemName: "square.stack")
-                            .font(.title2)
-                            .frame(width: 60, height: 60)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(6)
+                        albumPlaceholder
                     @unknown default:
                         EmptyView()
                     }
                 }
             } else {
-                Image(systemName: "square.stack")
-                    .font(.title2)
-                    .frame(width: 60, height: 60)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(6)
+                albumPlaceholder
             }
 
-            // Album info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(album.name)
-                    .font(.headline)
-                    .lineLimit(1)
-
-                Text(album.artistName)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                HStack(spacing: 8) {
-                    Text(String(format: String(localized: "metadata.tracks"), album.trackCount))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if let duration = album.formattedDuration {
-                        Text("metadata.separator")
-                            .foregroundStyle(.secondary)
-
-                        Text(duration)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let releaseDate = album.releaseDate {
-                        Text("metadata.separator")
-                            .foregroundStyle(.secondary)
-
-                        Text(releaseDate.prefix(4))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let albumType = album.albumType {
-                        Text("metadata.separator")
-                            .foregroundStyle(.secondary)
-
-                        Text(albumType.capitalized)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            // Album name
+            Text(album.name)
+                .font(.system(size: 13))
+                .lineLimit(1)
 
             Spacer()
 
-            // Play button
-            Button {
-                Task {
-                    let token = await session.validAccessToken()
-                    await playbackViewModel.play(uriOrUrl: album.uri, accessToken: token)
+            // Play button (on hover)
+            if isHovering {
+                Button {
+                    Task {
+                        let token = await session.validAccessToken()
+                        await playbackViewModel.play(uriOrUrl: album.uri, accessToken: token)
+                    }
+                } label: {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.green)
                 }
-            } label: {
-                Image(systemName: "play.circle.fill")
-                    .font(.title)
-                    .foregroundStyle(.green)
+                .buttonStyle(.plain)
+                .disabled(playbackViewModel.isLoading)
             }
-            .buttonStyle(.plain)
-            .disabled(playbackViewModel.isLoading)
         }
-        .padding()
-        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.gray.opacity(0.05))
-        .cornerRadius(8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
         .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovering = hovering
+        }
         .onTapGesture {
             onSelect()
         }
+    }
+
+    private var albumPlaceholder: some View {
+        Image(systemName: "square.stack")
+            .font(.system(size: 16))
+            .foregroundStyle(.secondary)
+            .frame(width: imageSize, height: imageSize)
+            .background(Color.gray.opacity(0.15))
+            .cornerRadius(4)
     }
 }

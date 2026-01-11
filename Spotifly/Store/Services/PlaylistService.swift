@@ -21,8 +21,8 @@ final class PlaylistService {
 
     /// Load user's playlists
     func loadUserPlaylists(accessToken: String, forceRefresh: Bool = false) async throws {
-        // Skip if already loaded and not forcing refresh
-        if store.playlistsPagination.isLoaded, !forceRefresh, !store.playlistsPagination.hasMore {
+        // Skip if already loaded and not forcing refresh (but only if we actually have data)
+        if store.playlistsPagination.isLoaded, !forceRefresh, !store.playlistsPagination.hasMore, !store.userPlaylistIds.isEmpty {
             return
         }
 

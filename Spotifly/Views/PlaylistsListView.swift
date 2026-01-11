@@ -58,16 +58,23 @@ struct PlaylistsListView: View {
                 .padding()
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(store.userPlaylists) { playlist in
-                            PlaylistRow(
-                                playlist: playlist,
-                                playbackViewModel: playbackViewModel,
-                                isSelected: selectedPlaylistId == playlist.id,
-                                onSelect: {
-                                    selectedPlaylistId = playlist.id
-                                },
-                            )
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(store.userPlaylists.enumerated()), id: \.element.id) { index, playlist in
+                            VStack(spacing: 0) {
+                                PlaylistRow(
+                                    playlist: playlist,
+                                    playbackViewModel: playbackViewModel,
+                                    isSelected: selectedPlaylistId == playlist.id,
+                                    onSelect: {
+                                        selectedPlaylistId = playlist.id
+                                    },
+                                )
+
+                                if index < store.userPlaylists.count - 1 {
+                                    Divider()
+                                        .padding(.leading, 56)
+                                }
+                            }
                         }
 
                         // Load more indicator
@@ -134,98 +141,75 @@ struct PlaylistRow: View {
     let onSelect: () -> Void
 
     @Environment(SpotifySession.self) private var session
+    @State private var isHovering = false
+
+    private let imageSize: CGFloat = 36
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             // Playlist image
             if let imageURL = playlist.imageURL {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
                     case .empty:
-                        ProgressView()
-                            .frame(width: 60, height: 60)
+                        playlistPlaceholder
                     case let .success(image):
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(width: 60, height: 60)
-                            .cornerRadius(6)
+                            .frame(width: imageSize, height: imageSize)
+                            .cornerRadius(4)
                     case .failure:
-                        Image(systemName: "music.note.list")
-                            .font(.title2)
-                            .frame(width: 60, height: 60)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(6)
+                        playlistPlaceholder
                     @unknown default:
                         EmptyView()
                     }
                 }
             } else {
-                Image(systemName: "music.note.list")
-                    .font(.title2)
-                    .frame(width: 60, height: 60)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(6)
+                playlistPlaceholder
             }
 
-            // Playlist info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(playlist.name)
-                    .font(.headline)
-                    .lineLimit(1)
-
-                if let description = playlist.description, !description.isEmpty {
-                    Text(description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                HStack(spacing: 8) {
-                    Text(String(format: String(localized: "metadata.tracks"), playlist.trackCount))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if let duration = playlist.formattedDuration {
-                        Text("metadata.separator")
-                            .foregroundStyle(.secondary)
-
-                        Text(duration)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Text("metadata.separator")
-                        .foregroundStyle(.secondary)
-
-                    Text(playlist.ownerName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            // Playlist name
+            Text(playlist.name)
+                .font(.system(size: 13))
+                .lineLimit(1)
 
             Spacer()
 
-            // Play button
-            Button {
-                Task {
-                    let token = await session.validAccessToken()
-                    await playbackViewModel.play(uriOrUrl: playlist.uri, accessToken: token)
+            // Play button (on hover)
+            if isHovering {
+                Button {
+                    Task {
+                        let token = await session.validAccessToken()
+                        await playbackViewModel.play(uriOrUrl: playlist.uri, accessToken: token)
+                    }
+                } label: {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.green)
                 }
-            } label: {
-                Image(systemName: "play.circle.fill")
-                    .font(.title)
-                    .foregroundStyle(.green)
+                .buttonStyle(.plain)
+                .disabled(playbackViewModel.isLoading)
             }
-            .buttonStyle(.plain)
-            .disabled(playbackViewModel.isLoading)
         }
-        .padding()
-        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.gray.opacity(0.05))
-        .cornerRadius(8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
         .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovering = hovering
+        }
         .onTapGesture {
             onSelect()
         }
+    }
+
+    private var playlistPlaceholder: some View {
+        Image(systemName: "music.note.list")
+            .font(.system(size: 16))
+            .foregroundStyle(.secondary)
+            .frame(width: imageSize, height: imageSize)
+            .background(Color.gray.opacity(0.15))
+            .cornerRadius(4)
     }
 }
