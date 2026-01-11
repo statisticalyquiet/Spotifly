@@ -30,6 +30,8 @@ struct SpeakersView: View {
                         Task {
                             let token = await session.validAccessToken()
                             await deviceService.loadDevices(accessToken: token)
+                            // Also refresh playback state and queue if Connect is active
+                            await connectService.refreshPlaybackState(accessToken: token)
                         }
                     } label: {
                         Image(systemName: "arrow.clockwise")

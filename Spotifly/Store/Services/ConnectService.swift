@@ -165,6 +165,39 @@ final class ConnectService {
         }
     }
 
+    // MARK: - Manual Sync
+
+    /// Force refresh the playback state and queue from Spotify Connect
+    /// Call this when the user manually refreshes the speakers view
+    func refreshPlaybackState(accessToken: String) async {
+        guard store.isSpotifyConnectActive else { return }
+
+        do {
+            guard let state = try await SpotifyAPI.fetchPlaybackState(accessToken: accessToken) else {
+                return
+            }
+
+            // Reset failure counter on success
+            store.connectConsecutiveSyncFailures = 0
+
+            // Update playback state
+            store.updateFromConnectState(state)
+
+            // Always refresh queue on manual refresh
+            await queueService.loadConnectQueue(accessToken: accessToken)
+
+            // Update device info
+            if let device = state.device {
+                store.spotifyConnectDeviceId = device.id
+                store.spotifyConnectDeviceName = device.name
+            }
+        } catch {
+            #if DEBUG
+                print("[ConnectService] refreshPlaybackState error: \(error)")
+            #endif
+        }
+    }
+
     // MARK: - Private Sync Methods
 
     private func startSyncTask(accessToken: String) {
