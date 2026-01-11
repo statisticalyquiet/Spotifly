@@ -13,6 +13,7 @@ import Foundation
 final class AlbumService {
     private let store: AppStore
     private var loadingAlbumTrackIds: Set<String> = []
+    private var userAlbumsTask: Task<Void, Error>?
 
     init(store: AppStore) {
         self.store = store
@@ -27,48 +28,61 @@ final class AlbumService {
             return
         }
 
-        // Reset pagination on force refresh
+        // Handle force refresh
         if forceRefresh {
+            userAlbumsTask?.cancel()
+            userAlbumsTask = nil
             store.albumsPagination.reset()
         }
 
-        guard !store.albumsPagination.isLoading else { return }
-        store.albumsPagination.isLoading = true
-
-        defer { store.albumsPagination.isLoading = false }
-
-        let offset = forceRefresh ? 0 : (store.albumsPagination.nextOffset ?? 0)
-
-        let response = try await SpotifyAPI.fetchUserAlbums(
-            accessToken: accessToken,
-            limit: 20,
-            offset: offset,
-        )
-
-        // Convert to unified Album entities
-        let albums = response.albums.map { Album(from: $0) }
-
-        // Upsert albums into store
-        store.upsertAlbums(albums)
-
-        // Update user album IDs
-        let albumIds = albums.map(\.id)
-        if forceRefresh {
-            store.setUserAlbumIds(albumIds)
-        } else {
-            store.appendUserAlbumIds(albumIds)
+        // If already loading, await existing task
+        if let existingTask = userAlbumsTask {
+            _ = try? await existingTask.value
+            return
         }
 
-        // Update pagination state
-        store.albumsPagination.isLoaded = true
-        store.albumsPagination.hasMore = response.hasMore
-        store.albumsPagination.nextOffset = response.nextOffset
-        store.albumsPagination.total = response.total
+        // Create and store the loading task
+        let offset = forceRefresh ? 0 : (store.albumsPagination.nextOffset ?? 0)
+        store.albumsPagination.isLoading = true
+        userAlbumsTask = Task {
+            defer {
+                self.userAlbumsTask = nil
+                self.store.albumsPagination.isLoading = false
+            }
+
+            let response = try await SpotifyAPI.fetchUserAlbums(
+                accessToken: accessToken,
+                limit: 20,
+                offset: offset,
+            )
+
+            // Convert to unified Album entities
+            let albums = response.albums.map { Album(from: $0) }
+
+            // Upsert albums into store
+            self.store.upsertAlbums(albums)
+
+            // Update user album IDs
+            let albumIds = albums.map(\.id)
+            if forceRefresh {
+                self.store.setUserAlbumIds(albumIds)
+            } else {
+                self.store.appendUserAlbumIds(albumIds)
+            }
+
+            // Update pagination state
+            self.store.albumsPagination.isLoaded = true
+            self.store.albumsPagination.hasMore = response.hasMore
+            self.store.albumsPagination.nextOffset = response.nextOffset
+            self.store.albumsPagination.total = response.total
+        }
+
+        try await userAlbumsTask!.value
     }
 
     /// Load more albums (pagination)
     func loadMoreAlbums(accessToken: String) async throws {
-        guard store.albumsPagination.hasMore, !store.albumsPagination.isLoading else {
+        guard store.albumsPagination.hasMore, userAlbumsTask == nil else {
             return
         }
         try await loadUserAlbums(accessToken: accessToken)

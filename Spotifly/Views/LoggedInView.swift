@@ -18,13 +18,15 @@ struct LoggedInView: View {
     private let playbackViewModel = PlaybackViewModel.shared
 
     // Normalized state store
-    @State private var store = AppStore()
+    @State private var store: AppStore
+
+    // Services that need Task deduplication (must persist across view recreations)
+    @State private var playlistService: PlaylistService
+    @State private var albumService: AlbumService
+    @State private var artistService: ArtistService
 
     // Services - stateless, created on demand (all state lives in AppStore)
     private var trackService: TrackService { TrackService(store: store) }
-    private var playlistService: PlaylistService { PlaylistService(store: store) }
-    private var albumService: AlbumService { AlbumService(store: store) }
-    private var artistService: ArtistService { ArtistService(store: store) }
     private var deviceService: DeviceService { DeviceService(store: store) }
     private var queueService: QueueService { QueueService(store: store) }
     private var recentlyPlayedService: RecentlyPlayedService { RecentlyPlayedService(store: store) }
@@ -41,7 +43,15 @@ struct LoggedInView: View {
     init(authResult: SpotifyAuthResult, onLogout: @escaping () -> Void) {
         self.authResult = authResult
         self.onLogout = onLogout
+
+        let store = AppStore()
+        _store = State(initialValue: store)
         _session = State(initialValue: SpotifySession(authResult: authResult))
+
+        // Initialize services that need Task deduplication
+        _playlistService = State(initialValue: PlaylistService(store: store))
+        _albumService = State(initialValue: AlbumService(store: store))
+        _artistService = State(initialValue: ArtistService(store: store))
     }
 
     @State private var selectedNavigationItem: NavigationItem? = .startpage
@@ -103,17 +113,12 @@ struct LoggedInView: View {
             // Load favorites so heart indicators work everywhere
             async let favorites: () = { try? await trackService.loadFavorites(accessToken: token) }()
 
-            // Load user library data (loaded early to avoid duplicate calls on view recreation)
-            async let albums: () = { try? await albumService.loadUserAlbums(accessToken: token) }()
-            async let playlists: () = { try? await playlistService.loadUserPlaylists(accessToken: token) }()
-            async let artists: () = { try? await artistService.loadUserArtists(accessToken: token) }()
-
             // Load startpage data (top artists, new releases, recently played)
             async let topArtists: () = topItemsService.loadTopArtists(accessToken: token)
             async let newReleases: () = newReleasesService.loadNewReleases(accessToken: token)
             async let recentlyPlayed: () = recentlyPlayedService.loadRecentlyPlayed(accessToken: token)
 
-            _ = await (favorites, albums, playlists, artists, topArtists, newReleases, recentlyPlayed)
+            _ = await (favorites, topArtists, newReleases, recentlyPlayed)
 
             // Only initialize player/Spirc and sync Connect if the setting is enabled
             if showConnectSpeakers {
