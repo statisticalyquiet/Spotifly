@@ -31,7 +31,7 @@ final class DeviceService {
         } catch let error as SpotifyAPIError {
             store.devicesErrorMessage = error.localizedDescription
         } catch {
-            store.devicesErrorMessage = String(localized: "devices.error.failed_to_load")
+            store.devicesErrorMessage = String(localized: "speakers.error.failed_to_load")
         }
 
         store.devicesIsLoading = false
@@ -84,7 +84,7 @@ final class DeviceService {
             store.devicesErrorMessage = error.localizedDescription
             return false
         } catch {
-            store.devicesErrorMessage = String(localized: "devices.error.failed_to_transfer")
+            store.devicesErrorMessage = String(localized: "speakers.error.failed_to_transfer")
             return false
         }
     }
