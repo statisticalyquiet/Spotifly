@@ -103,12 +103,17 @@ struct LoggedInView: View {
             // Load favorites so heart indicators work everywhere
             async let favorites: () = { try? await trackService.loadFavorites(accessToken: token) }()
 
+            // Load user library data (loaded early to avoid duplicate calls on view recreation)
+            async let albums: () = { try? await albumService.loadUserAlbums(accessToken: token) }()
+            async let playlists: () = { try? await playlistService.loadUserPlaylists(accessToken: token) }()
+            async let artists: () = { try? await artistService.loadUserArtists(accessToken: token) }()
+
             // Load startpage data (top artists, new releases, recently played)
             async let topArtists: () = topItemsService.loadTopArtists(accessToken: token)
             async let newReleases: () = newReleasesService.loadNewReleases(accessToken: token)
             async let recentlyPlayed: () = recentlyPlayedService.loadRecentlyPlayed(accessToken: token)
 
-            _ = await (favorites, topArtists, newReleases, recentlyPlayed)
+            _ = await (favorites, albums, playlists, artists, topArtists, newReleases, recentlyPlayed)
 
             // Only initialize player/Spirc and sync Connect if the setting is enabled
             if showConnectSpeakers {

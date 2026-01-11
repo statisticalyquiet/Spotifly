@@ -55,7 +55,7 @@ struct TrackContextMenu: View {
         } label: {
             Label(
                 isFavorited ? "track.menu.remove_from_favorites" : "track.menu.add_to_favorites",
-                systemImage: isFavorited ? "heart.slash" : "heart"
+                systemImage: isFavorited ? "heart.slash" : "heart",
             )
         }
 
@@ -67,17 +67,12 @@ struct TrackContextMenu: View {
                 Label("track.menu.add_to_new_playlist", systemImage: "plus")
             }
 
-            // Show playlists from store
-            let ownedPlaylists = store.userPlaylists.filter { $0.ownerId == session.userId }
-            if !ownedPlaylists.isEmpty {
-                Divider()
-
-                ForEach(ownedPlaylists) { playlist in
-                    Button(playlist.name) {
-                        addToPlaylist(playlistId: playlist.id)
-                    }
-                }
-            }
+            PlaylistSubmenuContent(
+                session: session,
+                store: store,
+                playlistService: playlistService,
+                onAddToPlaylist: addToPlaylist,
+            )
         } label: {
             Label("track.menu.add_to_playlist", systemImage: "music.note.list")
         }
@@ -216,7 +211,7 @@ extension TrackContextMenu {
         track: TrackRowData,
         currentSection: NavigationItem = .startpage,
         selectionId: String? = nil,
-        playbackViewModel: PlaybackViewModel
+        playbackViewModel: PlaybackViewModel,
     ) {
         self.track = track
         self.currentSection = currentSection
@@ -224,5 +219,61 @@ extension TrackContextMenu {
         self.playbackViewModel = playbackViewModel
         _showNewPlaylistDialog = .constant(false)
         onPlaylistAdded = nil
+    }
+}
+
+// MARK: - Playlist Submenu Content (lazy loading)
+
+/// A view that loads playlists on-demand when the submenu appears
+private struct PlaylistSubmenuContent: View {
+    let session: SpotifySession
+    let store: AppStore
+    let playlistService: PlaylistService
+    let onAddToPlaylist: (String) -> Void
+
+    @State private var hasTriggeredLoad = false
+
+    private var ownedPlaylists: [Playlist] {
+        store.userPlaylists.filter { $0.ownerId == session.userId }
+    }
+
+    var body: some View {
+        // Loading state
+        if store.playlistsPagination.isLoading, ownedPlaylists.isEmpty {
+            Text("playlist.loading")
+                .foregroundStyle(.secondary)
+                .onAppear {
+                    triggerLoadIfNeeded()
+                }
+        } else if ownedPlaylists.isEmpty {
+            // No playlists yet - trigger load and show placeholder
+            Text("playlist.loading")
+                .foregroundStyle(.secondary)
+                .onAppear {
+                    triggerLoadIfNeeded()
+                }
+        } else {
+            // Show playlists
+            Divider()
+
+            ForEach(ownedPlaylists) { playlist in
+                Button(playlist.name) {
+                    onAddToPlaylist(playlist.id)
+                }
+            }
+        }
+    }
+
+    private func triggerLoadIfNeeded() {
+        guard !hasTriggeredLoad else { return }
+        hasTriggeredLoad = true
+
+        Task {
+            await session.loadUserIdIfNeeded()
+            if store.userPlaylists.isEmpty, !store.playlistsPagination.isLoading {
+                let token = await session.validAccessToken()
+                try? await playlistService.loadUserPlaylists(accessToken: token)
+            }
+        }
     }
 }

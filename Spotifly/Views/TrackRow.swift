@@ -237,15 +237,6 @@ struct TrackRow: View {
         } message: {
             Text("playlist.new.message")
         }
-        .task {
-            // Load user ID and playlists if not already loaded
-            await session.loadUserIdIfNeeded()
-            // Load playlists via service if store is empty
-            if store.userPlaylists.isEmpty, !store.playlistsPagination.isLoading {
-                let token = await session.validAccessToken()
-                try? await playlistService.loadUserPlaylists(accessToken: token)
-            }
-        }
     }
 
     private func handleDoubleTap() {
@@ -365,4 +356,3 @@ extension APITrack {
         )
     }
 }
-
