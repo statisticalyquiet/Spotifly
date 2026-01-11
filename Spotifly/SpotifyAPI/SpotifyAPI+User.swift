@@ -33,22 +33,17 @@ extension SpotifyAPI {
 
         switch httpResponse.statusCode {
         case 200:
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let userId = json["id"] as? String
-            else {
+            do {
+                let profile = try JSONDecoder().decode(UserProfileCodable.self, from: data)
+                return profile.id
+            } catch {
                 throw SpotifyAPIError.invalidResponse
             }
-            return userId
-
         case 401:
             throw SpotifyAPIError.unauthorized
-
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
@@ -78,79 +73,17 @@ extension SpotifyAPI {
 
         switch httpResponse.statusCode {
         case 200:
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let items = json["items"] as? [[String: Any]]
-            else {
+            do {
+                let decoded = try JSONDecoder().decode(RecentlyPlayedCodable.self, from: data)
+                return decoded.toRecentlyPlayedResponse()
+            } catch {
                 throw SpotifyAPIError.invalidResponse
             }
-
-            let recentlyPlayedItems = items.compactMap { item -> RecentlyPlayedItem? in
-                guard let track = item["track"] as? [String: Any],
-                      let id = track["id"] as? String,
-                      let name = track["name"] as? String,
-                      let uri = track["uri"] as? String,
-                      let durationMs = track["duration_ms"] as? Int,
-                      let playedAt = item["played_at"] as? String
-                else {
-                    return nil
-                }
-
-                let artistsArray = track["artists"] as? [[String: Any]]
-                let artistName = artistsArray?.first?["name"] as? String ?? "Unknown"
-                let artistId = artistsArray?.first?["id"] as? String
-
-                let albumData = track["album"] as? [String: Any]
-                let albumName = albumData?["name"] as? String ?? ""
-                let albumId = albumData?["id"] as? String
-                let albumImages = albumData?["images"] as? [[String: Any]]
-                let imageURLString = albumImages?.first?["url"] as? String
-                let imageURL = imageURLString.flatMap { URL(string: $0) }
-
-                let externalUrls = track["external_urls"] as? [String: Any]
-                let externalUrl = externalUrls?["spotify"] as? String
-
-                let apiTrack = APITrack(
-                    id: id,
-                    addedAt: nil,
-                    albumId: albumId,
-                    albumName: albumName,
-                    artistId: artistId,
-                    artistName: artistName,
-                    durationMs: durationMs,
-                    externalUrl: externalUrl,
-                    imageURL: imageURL,
-                    name: name,
-                    trackNumber: nil,
-                    uri: uri,
-                )
-
-                var context: PlaybackContext?
-                if let contextData = item["context"] as? [String: Any],
-                   let contextType = contextData["type"] as? String,
-                   let contextUri = contextData["uri"] as? String
-                {
-                    context = PlaybackContext(type: contextType, uri: contextUri)
-                }
-
-                return RecentlyPlayedItem(
-                    id: playedAt,
-                    context: context,
-                    playedAt: playedAt,
-                    track: apiTrack,
-                )
-            }
-
-            return RecentlyPlayedResponse(items: recentlyPlayedItems)
-
         case 401:
             throw SpotifyAPIError.unauthorized
-
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }

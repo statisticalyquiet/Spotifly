@@ -37,62 +37,19 @@ extension SpotifyAPI {
 
         switch httpResponse.statusCode {
         case 200:
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tracks = json["tracks"] as? [[String: Any]]
-            else {
+            do {
+                let decoded = try JSONDecoder().decode(RecommendationsCodable.self, from: data)
+                return decoded.tracks.map { $0.toAPITrack() }
+            } catch {
                 throw SpotifyAPIError.invalidResponse
             }
-
-            let recommendedTracks = tracks.compactMap { item -> APITrack? in
-                guard let id = item["id"] as? String,
-                      let name = item["name"] as? String,
-                      let uri = item["uri"] as? String,
-                      let durationMs = item["duration_ms"] as? Int
-                else {
-                    return nil
-                }
-
-                let artistsArray = item["artists"] as? [[String: Any]]
-                let artistName = artistsArray?.first?["name"] as? String ?? "Unknown"
-                let artistId = artistsArray?.first?["id"] as? String
-
-                let albumData = item["album"] as? [String: Any]
-                let albumName = albumData?["name"] as? String ?? ""
-                let albumId = albumData?["id"] as? String
-                let albumImages = albumData?["images"] as? [[String: Any]]
-                let imageURLString = albumImages?.first?["url"] as? String
-                let imageURL = imageURLString.flatMap { URL(string: $0) }
-
-                let externalUrls = item["external_urls"] as? [String: Any]
-                let externalUrl = externalUrls?["spotify"] as? String
-
-                return APITrack(
-                    id: id,
-                    addedAt: nil,
-                    albumId: albumId,
-                    albumName: albumName,
-                    artistId: artistId,
-                    artistName: artistName,
-                    durationMs: durationMs,
-                    externalUrl: externalUrl,
-                    imageURL: imageURL,
-                    name: name,
-                    trackNumber: nil,
-                    uri: uri,
-                )
-            }
-
-            return recommendedTracks
         case 401:
             throw SpotifyAPIError.unauthorized
         case 404:
             throw SpotifyAPIError.notFound
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
@@ -129,184 +86,90 @@ extension SpotifyAPI {
 
         switch httpResponse.statusCode {
         case 200:
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw SpotifyAPIError.invalidResponse
-            }
+            do {
+                let decoded = try JSONDecoder().decode(SearchResultsCodable.self, from: data)
 
-            // Parse tracks
-            var tracks: [Track] = []
-            if let tracksObj = json["tracks"] as? [String: Any],
-               let items = tracksObj["items"] as? [[String: Any]]
-            {
-                tracks = items.compactMap { item -> Track? in
-                    guard let id = item["id"] as? String,
-                          let name = item["name"] as? String,
-                          let uri = item["uri"] as? String,
-                          let durationMs = item["duration_ms"] as? Int
-                    else {
-                        return nil
-                    }
-
-                    let artistsArray = item["artists"] as? [[String: Any]]
-                    let artistName = artistsArray?.first?["name"] as? String ?? "Unknown"
-                    let artistId = artistsArray?.first?["id"] as? String
-
-                    let albumData = item["album"] as? [String: Any]
-                    let albumName = albumData?["name"] as? String
-                    let albumId = albumData?["id"] as? String
-                    let albumImages = albumData?["images"] as? [[String: Any]]
-                    let imageURLString = albumImages?.first?["url"] as? String
-                    let imageURL = imageURLString.flatMap { URL(string: $0) }
-
-                    let externalUrls = item["external_urls"] as? [String: Any]
-                    let externalUrl = externalUrls?["spotify"] as? String
-
+                // Convert tracks
+                let tracks: [Track] = decoded.tracks?.items?.map { track in
+                    let artist = track.artists?.first
                     return Track(
-                        id: id,
-                        name: name,
-                        uri: uri,
-                        durationMs: durationMs,
-                        trackNumber: nil,
-                        externalUrl: externalUrl,
-                        albumId: albumId,
-                        artistId: artistId,
-                        artistName: artistName,
-                        albumName: albumName,
-                        imageURL: imageURL,
+                        id: track.id,
+                        name: track.name,
+                        uri: track.uri,
+                        durationMs: track.durationMs,
+                        trackNumber: track.trackNumber,
+                        externalUrl: track.externalUrls?.spotify,
+                        albumId: track.album?.id,
+                        artistId: artist?.id,
+                        artistName: artist?.name ?? "Unknown",
+                        albumName: track.album?.name,
+                        imageURL: (track.album?.images?.first?.url).flatMap { URL(string: $0) },
                     )
-                }
-            }
+                } ?? []
 
-            // Parse albums
-            var albums: [Album] = []
-            if let albumsObj = json["albums"] as? [String: Any],
-               let items = albumsObj["items"] as? [[String: Any]]
-            {
-                albums = items.compactMap { item -> Album? in
-                    guard let id = item["id"] as? String,
-                          let name = item["name"] as? String,
-                          let uri = item["uri"] as? String
-                    else {
-                        return nil
-                    }
-
-                    let artistsArray = item["artists"] as? [[String: Any]]
-                    let artistName = artistsArray?.first?["name"] as? String ?? "Unknown"
-                    let artistId = artistsArray?.first?["id"] as? String
-
-                    let images = item["images"] as? [[String: Any]]
-                    let imageURLString = images?.first?["url"] as? String
-                    let imageURL = imageURLString.flatMap { URL(string: $0) }
-
-                    let totalTracks = item["total_tracks"] as? Int ?? 0
-                    let releaseDate = item["release_date"] as? String
-
+                // Convert albums
+                let albums: [Album] = decoded.albums?.items?.map { album in
+                    let artist = album.artists?.first
                     return Album(
-                        id: id,
-                        name: name,
-                        uri: uri,
-                        imageURL: imageURL,
-                        releaseDate: releaseDate,
-                        albumType: nil,
-                        externalUrl: nil,
-                        artistId: artistId,
-                        artistName: artistName,
+                        id: album.id,
+                        name: album.name,
+                        uri: album.uri,
+                        imageURL: (album.images?.first?.url).flatMap { URL(string: $0) },
+                        releaseDate: album.releaseDate,
+                        albumType: album.albumType,
+                        externalUrl: album.externalUrls?.spotify,
+                        artistId: artist?.id,
+                        artistName: artist?.name ?? "Unknown",
                         trackIds: [],
                         totalDurationMs: nil,
-                        knownTrackCount: totalTracks,
+                        knownTrackCount: album.totalTracks ?? 0,
                     )
-                }
-            }
+                } ?? []
 
-            // Parse artists
-            var artists: [Artist] = []
-            if let artistsObj = json["artists"] as? [String: Any],
-               let items = artistsObj["items"] as? [[String: Any]]
-            {
-                artists = items.compactMap { item -> Artist? in
-                    guard let id = item["id"] as? String,
-                          let name = item["name"] as? String,
-                          let uri = item["uri"] as? String
-                    else {
-                        return nil
-                    }
-
-                    let genres = item["genres"] as? [String] ?? []
-                    let followersDict = item["followers"] as? [String: Any]
-                    let followers = followersDict?["total"] as? Int ?? 0
-
-                    let images = item["images"] as? [[String: Any]]
-                    let imageURLString = images?.first?["url"] as? String
-                    let imageURL = imageURLString.flatMap { URL(string: $0) }
-
+                // Convert artists
+                let artists: [Artist] = decoded.artists?.items?.compactMap { artist -> Artist? in
+                    guard let id = artist.id, let uri = artist.uri else { return nil }
                     return Artist(
                         id: id,
-                        name: name,
+                        name: artist.name,
                         uri: uri,
-                        imageURL: imageURL,
-                        genres: genres,
-                        followers: followers,
+                        imageURL: (artist.images?.first?.url).flatMap { URL(string: $0) },
+                        genres: artist.genres ?? [],
+                        followers: artist.followers?.total ?? 0,
                     )
-                }
-            }
+                } ?? []
 
-            // Parse playlists
-            var playlists: [Playlist] = []
-            if let playlistsObj = json["playlists"] as? [String: Any],
-               let items = playlistsObj["items"] as? [[String: Any]]
-            {
-                playlists = items.compactMap { item -> Playlist? in
-                    guard let id = item["id"] as? String,
-                          let name = item["name"] as? String,
-                          let uri = item["uri"] as? String,
-                          let owner = item["owner"] as? [String: Any],
-                          let ownerId = owner["id"] as? String
-                    else {
-                        return nil
-                    }
-
-                    let ownerName = owner["display_name"] as? String ?? ownerId
-                    let description = item["description"] as? String
-
-                    let images = item["images"] as? [[String: Any]]
-                    let imageURLString = images?.first?["url"] as? String
-                    let imageURL = imageURLString.flatMap { URL(string: $0) }
-
-                    let tracksObj = item["tracks"] as? [String: Any]
-                    let trackCount = tracksObj?["total"] as? Int ?? 0
-
-                    return Playlist(
-                        id: id,
-                        name: name,
-                        description: description,
-                        imageURL: imageURL,
-                        uri: uri,
-                        isPublic: true,
-                        ownerId: ownerId,
-                        ownerName: ownerName,
+                // Convert playlists
+                let playlists: [Playlist] = decoded.playlists?.items?.map { playlist in
+                    Playlist(
+                        id: playlist.id,
+                        name: playlist.name,
+                        description: playlist.description,
+                        imageURL: (playlist.images?.first?.url).flatMap { URL(string: $0) },
+                        uri: playlist.uri,
+                        isPublic: playlist.public ?? true,
+                        ownerId: playlist.owner.id,
+                        ownerName: playlist.owner.displayName ?? playlist.owner.id,
                         trackIds: [],
                         totalDurationMs: nil,
-                        knownTrackCount: trackCount,
+                        knownTrackCount: playlist.tracks?.total ?? 0,
                     )
-                }
+                } ?? []
+
+                return SearchResults(
+                    albums: albums,
+                    artists: artists,
+                    playlists: playlists,
+                    tracks: tracks,
+                )
+            } catch {
+                throw SpotifyAPIError.invalidResponse
             }
-
-            return SearchResults(
-                albums: albums,
-                artists: artists,
-                playlists: playlists,
-                tracks: tracks,
-            )
-
         case 401:
             throw SpotifyAPIError.unauthorized
-
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }

@@ -33,42 +33,18 @@ extension SpotifyAPI {
 
         switch httpResponse.statusCode {
         case 200:
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let devicesArray = json["devices"] as? [[String: Any]]
-            else {
+            do {
+                let decoded = try JSONDecoder().decode(DevicesCodable.self, from: data)
+                let devices = decoded.devices.compactMap { $0.toSpotifyDevice() }
+                return DevicesResponse(devices: devices)
+            } catch {
                 throw SpotifyAPIError.invalidResponse
             }
-
-            let devices = devicesArray.compactMap { item -> SpotifyDevice? in
-                guard let id = item["id"] as? String,
-                      let name = item["name"] as? String,
-                      let type = item["type"] as? String
-                else {
-                    return nil
-                }
-
-                return SpotifyDevice(
-                    id: id,
-                    isActive: item["is_active"] as? Bool ?? false,
-                    isPrivateSession: item["is_private_session"] as? Bool ?? false,
-                    isRestricted: item["is_restricted"] as? Bool ?? false,
-                    name: name,
-                    type: type,
-                    volumePercent: item["volume_percent"] as? Int,
-                )
-            }
-
-            return DevicesResponse(devices: devices)
-
         case 401:
             throw SpotifyAPIError.unauthorized
-
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
@@ -110,11 +86,8 @@ extension SpotifyAPI {
         case 404:
             throw SpotifyAPIError.notFound
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
@@ -171,11 +144,8 @@ extension SpotifyAPI {
         case 404:
             throw SpotifyAPIError.apiError("No active device found")
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
@@ -312,11 +282,8 @@ extension SpotifyAPI {
         case 401:
             throw SpotifyAPIError.unauthorized
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
@@ -356,11 +323,8 @@ extension SpotifyAPI {
         case 404:
             throw SpotifyAPIError.notFound
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
@@ -390,55 +354,19 @@ extension SpotifyAPI {
 
         switch httpResponse.statusCode {
         case 200:
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            do {
+                let decoded = try JSONDecoder().decode(PlaybackStateCodable.self, from: data)
+                return decoded.toPlaybackState()
+            } catch {
                 throw SpotifyAPIError.invalidResponse
             }
-
-            let isPlaying = json["is_playing"] as? Bool ?? false
-            let progressMs = json["progress_ms"] as? Int ?? 0
-            let shuffleState = json["shuffle_state"] as? Bool ?? false
-            let repeatState = json["repeat_state"] as? String ?? "off"
-
-            var device: SpotifyDevice?
-            if let deviceJson = json["device"] as? [String: Any],
-               let deviceId = deviceJson["id"] as? String,
-               let deviceName = deviceJson["name"] as? String,
-               let deviceType = deviceJson["type"] as? String
-            {
-                device = SpotifyDevice(
-                    id: deviceId,
-                    isActive: deviceJson["is_active"] as? Bool ?? false,
-                    isPrivateSession: deviceJson["is_private_session"] as? Bool ?? false,
-                    isRestricted: deviceJson["is_restricted"] as? Bool ?? false,
-                    name: deviceName,
-                    type: deviceType,
-                    volumePercent: deviceJson["volume_percent"] as? Int,
-                )
-            }
-
-            var currentTrack: APITrack?
-            if let item = json["item"] as? [String: Any] {
-                currentTrack = parseTrackFromJSON(item)
-            }
-
-            return PlaybackState(
-                currentTrack: currentTrack,
-                device: device,
-                isPlaying: isPlaying,
-                progressMs: progressMs,
-                repeatState: repeatState,
-                shuffleState: shuffleState,
-            )
         case 204:
             return nil
         case 401:
             throw SpotifyAPIError.unauthorized
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
@@ -466,69 +394,21 @@ extension SpotifyAPI {
 
         switch httpResponse.statusCode {
         case 200:
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            do {
+                let decoded = try JSONDecoder().decode(QueueCodable.self, from: data)
+                return decoded.toQueueResponse()
+            } catch {
                 throw SpotifyAPIError.invalidResponse
             }
-
-            let currentlyPlaying: APITrack? = (json["currently_playing"] as? [String: Any]).flatMap { parseTrackFromJSON($0) }
-            let queueArray = json["queue"] as? [[String: Any]] ?? []
-            let queue = queueArray.compactMap { parseTrackFromJSON($0) }
-
-            return QueueResponse(currentlyPlaying: currentlyPlaying, queue: queue)
         case 204:
             return QueueResponse(currentlyPlaying: nil, queue: [])
         case 401:
             throw SpotifyAPIError.unauthorized
         default:
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String
-            {
-                throw SpotifyAPIError.apiError(message)
+            if let errorResponse = try? JSONDecoder().decode(SpotifyErrorResponse.self, from: data) {
+                throw SpotifyAPIError.apiError(errorResponse.error.message)
             }
             throw SpotifyAPIError.apiError("HTTP \(httpResponse.statusCode)")
         }
-    }
-
-    // MARK: - Helper
-
-    /// Parses a track from JSON (used for playback state and queue)
-    private static func parseTrackFromJSON(_ json: [String: Any]) -> APITrack? {
-        guard let id = json["id"] as? String,
-              let name = json["name"] as? String,
-              let uri = json["uri"] as? String,
-              let durationMs = json["duration_ms"] as? Int
-        else {
-            return nil
-        }
-
-        let artistsArray = json["artists"] as? [[String: Any]]
-        let artistName = artistsArray?.compactMap { $0["name"] as? String }.joined(separator: ", ") ?? "Unknown"
-        let artistId = artistsArray?.first?["id"] as? String
-
-        let albumData = json["album"] as? [String: Any]
-        let albumName = albumData?["name"] as? String
-        let albumId = albumData?["id"] as? String
-        let albumImages = albumData?["images"] as? [[String: Any]]
-        let imageURLString = albumImages?.first?["url"] as? String
-        let imageURL = imageURLString.flatMap { URL(string: $0) }
-
-        let externalUrls = json["external_urls"] as? [String: Any]
-        let externalUrl = externalUrls?["spotify"] as? String
-
-        return APITrack(
-            id: id,
-            addedAt: nil,
-            albumId: albumId,
-            albumName: albumName,
-            artistId: artistId,
-            artistName: artistName,
-            durationMs: durationMs,
-            externalUrl: externalUrl,
-            imageURL: imageURL,
-            name: name,
-            trackNumber: nil,
-            uri: uri,
-        )
     }
 }

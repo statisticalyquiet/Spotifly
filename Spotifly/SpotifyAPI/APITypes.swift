@@ -246,6 +246,517 @@ struct TrackMetadata: Sendable {
     }
 }
 
+// MARK: - Codable Response Types (Internal)
+
+/// These types are used only for JSON decoding from Spotify API responses.
+/// They map directly to the JSON structure, then convert to the public API types.
+
+// MARK: Shared Primitives
+
+struct SpotifyErrorResponse: Decodable {
+    let error: SpotifyErrorBody
+    struct SpotifyErrorBody: Decodable {
+        let message: String
+        let status: Int
+    }
+}
+
+struct ImageCodable: Decodable {
+    let url: String
+    let height: Int?
+    let width: Int?
+}
+
+struct ExternalUrlsCodable: Decodable {
+    let spotify: String?
+}
+
+struct FollowersCodable: Decodable {
+    let total: Int?
+}
+
+struct ContextCodable: Decodable {
+    let type: String
+    let uri: String
+}
+
+struct OwnerCodable: Decodable {
+    let id: String
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+    }
+}
+
+struct CursorsCodable: Decodable {
+    let after: String?
+}
+
+// MARK: Artist Codable
+
+struct ArtistCodable: Decodable {
+    let id: String?
+    let name: String
+    let uri: String?
+    let genres: [String]?
+    let followers: FollowersCodable?
+    let images: [ImageCodable]?
+}
+
+extension ArtistCodable {
+    func toAPIArtist() -> APIArtist? {
+        guard let id, let uri else { return nil }
+        return APIArtist(
+            id: id,
+            followers: followers?.total ?? 0,
+            genres: genres ?? [],
+            imageURL: (images?.first?.url).flatMap { URL(string: $0) },
+            name: name,
+            uri: uri,
+        )
+    }
+}
+
+// MARK: Album Codable (simplified for nested use)
+
+struct AlbumSimpleCodable: Decodable {
+    let id: String?
+    let name: String
+    let images: [ImageCodable]?
+}
+
+// MARK: Album Codable (full)
+
+struct AlbumCodable: Decodable {
+    let id: String
+    let name: String
+    let uri: String
+    let albumType: String?
+    let totalTracks: Int?
+    let releaseDate: String?
+    let artists: [ArtistCodable]?
+    let images: [ImageCodable]?
+    let tracks: TracksPagingCodable?
+    let externalUrls: ExternalUrlsCodable?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, uri, artists, images, tracks
+        case albumType = "album_type"
+        case totalTracks = "total_tracks"
+        case releaseDate = "release_date"
+        case externalUrls = "external_urls"
+    }
+
+    struct TracksPagingCodable: Decodable {
+        let items: [TrackItemCodable]?
+        struct TrackItemCodable: Decodable {
+            let durationMs: Int?
+            enum CodingKeys: String, CodingKey {
+                case durationMs = "duration_ms"
+            }
+        }
+    }
+
+    func toAPIAlbum() -> APIAlbum {
+        let artist = artists?.first
+        let totalDurationMs = tracks?.items?.compactMap(\.durationMs).reduce(0, +)
+        return APIAlbum(
+            id: id,
+            albumType: albumType,
+            artistId: artist?.id,
+            artistName: artist?.name ?? "Unknown",
+            externalUrl: externalUrls?.spotify,
+            imageURL: (images?.first?.url).flatMap { URL(string: $0) },
+            name: name,
+            releaseDate: releaseDate ?? "",
+            totalDurationMs: totalDurationMs,
+            trackCount: totalTracks ?? 0,
+            uri: uri,
+        )
+    }
+}
+
+// MARK: Track Codable
+
+struct TrackCodable: Decodable {
+    let id: String
+    let name: String
+    let uri: String
+    let durationMs: Int
+    let trackNumber: Int?
+    let artists: [ArtistCodable]?
+    let album: AlbumSimpleCodable?
+    let externalUrls: ExternalUrlsCodable?
+    let previewUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, uri, artists, album
+        case durationMs = "duration_ms"
+        case trackNumber = "track_number"
+        case externalUrls = "external_urls"
+        case previewUrl = "preview_url"
+    }
+
+    func toAPITrack(addedAt: String? = nil, albumId: String? = nil, albumName: String? = nil, imageURL: URL? = nil) -> APITrack {
+        let artist = artists?.first
+        return APITrack(
+            id: id,
+            addedAt: addedAt,
+            albumId: albumId ?? album?.id,
+            albumName: albumName ?? album?.name,
+            artistId: artist?.id,
+            artistName: artist?.name ?? "Unknown",
+            durationMs: durationMs,
+            externalUrl: externalUrls?.spotify,
+            imageURL: imageURL ?? (album?.images?.first?.url).flatMap { URL(string: $0) },
+            name: name,
+            trackNumber: trackNumber,
+            uri: uri,
+        )
+    }
+
+    func toTrackMetadata() -> TrackMetadata {
+        let artistNames = artists?.compactMap(\.name).joined(separator: ", ") ?? "Unknown Artist"
+        return TrackMetadata(
+            id: id,
+            albumImageURL: (album?.images?.first?.url).flatMap { URL(string: $0) },
+            albumName: album?.name ?? "Unknown Album",
+            artistName: artistNames,
+            durationMs: durationMs,
+            name: name,
+            previewURL: previewUrl.flatMap { URL(string: $0) },
+        )
+    }
+}
+
+// MARK: Playlist Codable
+
+struct PlaylistCodable: Decodable {
+    let id: String
+    let name: String
+    let uri: String
+    let description: String?
+    let images: [ImageCodable]?
+    let owner: OwnerCodable
+    let `public`: Bool?
+    let tracks: PlaylistTracksCodable?
+
+    struct PlaylistTracksCodable: Decodable {
+        let total: Int?
+        let items: [PlaylistTrackItemCodable]?
+    }
+
+    struct PlaylistTrackItemCodable: Decodable {
+        let track: TrackDurationCodable?
+        struct TrackDurationCodable: Decodable {
+            let durationMs: Int?
+            enum CodingKeys: String, CodingKey {
+                case durationMs = "duration_ms"
+            }
+        }
+    }
+
+    func toAPIPlaylist() -> APIPlaylist {
+        let durations = tracks?.items?.compactMap { $0.track?.durationMs } ?? []
+        let totalDurationMs = durations.isEmpty ? nil : durations.reduce(0, +)
+        return APIPlaylist(
+            id: id,
+            description: description,
+            imageURL: (images?.first?.url).flatMap { URL(string: $0) },
+            isPublic: `public`,
+            name: name,
+            ownerId: owner.id,
+            ownerName: owner.displayName ?? owner.id,
+            totalDurationMs: totalDurationMs,
+            trackCount: tracks?.total ?? 0,
+            uri: uri,
+        )
+    }
+}
+
+// MARK: Device Codable
+
+struct DeviceCodable: Decodable {
+    let id: String?
+    let name: String
+    let type: String
+    let isActive: Bool?
+    let isPrivateSession: Bool?
+    let isRestricted: Bool?
+    let volumePercent: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, type
+        case isActive = "is_active"
+        case isPrivateSession = "is_private_session"
+        case isRestricted = "is_restricted"
+        case volumePercent = "volume_percent"
+    }
+
+    func toSpotifyDevice() -> SpotifyDevice? {
+        guard let id else { return nil }
+        return SpotifyDevice(
+            id: id,
+            isActive: isActive ?? false,
+            isPrivateSession: isPrivateSession ?? false,
+            isRestricted: isRestricted ?? false,
+            name: name,
+            type: type,
+            volumePercent: volumePercent,
+        )
+    }
+}
+
+// MARK: - Response Codables
+
+// User profile
+struct UserProfileCodable: Decodable {
+    let id: String
+}
+
+// Saved tracks
+struct SavedTracksCodable: Decodable {
+    let items: [SavedTrackItemCodable]
+    let total: Int
+    let next: String?
+
+    struct SavedTrackItemCodable: Decodable {
+        let addedAt: String?
+        let track: TrackCodable
+
+        enum CodingKeys: String, CodingKey {
+            case addedAt = "added_at"
+            case track
+        }
+    }
+}
+
+// Check saved tracks (returns array of bools)
+// Note: This is just [Bool], decoded directly
+
+// Album tracks
+struct AlbumTracksCodable: Decodable {
+    let items: [AlbumTrackItemCodable]
+
+    struct AlbumTrackItemCodable: Decodable {
+        let id: String
+        let name: String
+        let uri: String
+        let durationMs: Int
+        let trackNumber: Int?
+        let artists: [ArtistCodable]?
+        let externalUrls: ExternalUrlsCodable?
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, uri, artists
+            case durationMs = "duration_ms"
+            case trackNumber = "track_number"
+            case externalUrls = "external_urls"
+        }
+
+        func toAPITrack(albumId: String, albumName: String?, imageURL: URL?) -> APITrack {
+            let artist = artists?.first
+            return APITrack(
+                id: id,
+                addedAt: nil,
+                albumId: albumId,
+                albumName: albumName,
+                artistId: artist?.id,
+                artistName: artist?.name ?? "Unknown",
+                durationMs: durationMs,
+                externalUrl: externalUrls?.spotify,
+                imageURL: imageURL,
+                name: name,
+                trackNumber: trackNumber,
+                uri: uri,
+            )
+        }
+    }
+}
+
+// Playlist tracks
+struct PlaylistTracksCodable: Decodable {
+    let items: [PlaylistTrackItemCodable]
+
+    struct PlaylistTrackItemCodable: Decodable {
+        let addedAt: String?
+        let track: TrackCodable?
+
+        enum CodingKeys: String, CodingKey {
+            case addedAt = "added_at"
+            case track
+        }
+    }
+}
+
+// Artist top tracks
+struct ArtistTopTracksCodable: Decodable {
+    let tracks: [TrackCodable]
+}
+
+// User albums
+struct UserAlbumsCodable: Decodable {
+    let items: [UserAlbumItemCodable]
+    let total: Int
+    let next: String?
+
+    struct UserAlbumItemCodable: Decodable {
+        let album: AlbumCodable
+    }
+}
+
+// Artist albums
+struct ArtistAlbumsCodable: Decodable {
+    let items: [AlbumCodable]
+}
+
+// New releases
+struct NewReleasesCodable: Decodable {
+    let albums: AlbumsPagingCodable
+
+    struct AlbumsPagingCodable: Decodable {
+        let items: [AlbumCodable]
+        let total: Int
+    }
+}
+
+// User artists (followed)
+struct UserArtistsCodable: Decodable {
+    let artists: ArtistsPagingCodable
+
+    struct ArtistsPagingCodable: Decodable {
+        let items: [ArtistCodable]
+        let total: Int
+        let cursors: CursorsCodable?
+    }
+}
+
+// Top artists
+struct TopArtistsCodable: Decodable {
+    let items: [ArtistCodable]
+    let total: Int
+    let next: String?
+}
+
+// User playlists
+struct UserPlaylistsCodable: Decodable {
+    let items: [PlaylistCodable]
+    let total: Int
+    let next: String?
+}
+
+// Devices
+struct DevicesCodable: Decodable {
+    let devices: [DeviceCodable]
+}
+
+// Playback state
+struct PlaybackStateCodable: Decodable {
+    let device: DeviceCodable?
+    let item: TrackCodable?
+    let isPlaying: Bool?
+    let progressMs: Int?
+    let shuffleState: Bool?
+    let repeatState: String?
+
+    enum CodingKeys: String, CodingKey {
+        case device, item
+        case isPlaying = "is_playing"
+        case progressMs = "progress_ms"
+        case shuffleState = "shuffle_state"
+        case repeatState = "repeat_state"
+    }
+
+    func toPlaybackState() -> PlaybackState {
+        PlaybackState(
+            currentTrack: item?.toAPITrack(),
+            device: device?.toSpotifyDevice(),
+            isPlaying: isPlaying ?? false,
+            progressMs: progressMs ?? 0,
+            repeatState: repeatState ?? "off",
+            shuffleState: shuffleState ?? false,
+        )
+    }
+}
+
+// Queue
+struct QueueCodable: Decodable {
+    let currentlyPlaying: TrackCodable?
+    let queue: [TrackCodable]?
+
+    enum CodingKeys: String, CodingKey {
+        case currentlyPlaying = "currently_playing"
+        case queue
+    }
+
+    func toQueueResponse() -> QueueResponse {
+        QueueResponse(
+            currentlyPlaying: currentlyPlaying?.toAPITrack(),
+            queue: queue?.map { $0.toAPITrack() } ?? [],
+        )
+    }
+}
+
+// Recently played
+struct RecentlyPlayedCodable: Decodable {
+    let items: [RecentlyPlayedItemCodable]
+
+    struct RecentlyPlayedItemCodable: Decodable {
+        let track: TrackCodable
+        let playedAt: String
+        let context: ContextCodable?
+
+        enum CodingKeys: String, CodingKey {
+            case track
+            case playedAt = "played_at"
+            case context
+        }
+    }
+
+    func toRecentlyPlayedResponse() -> RecentlyPlayedResponse {
+        let items = items.map { item in
+            RecentlyPlayedItem(
+                id: item.playedAt,
+                context: item.context.map { PlaybackContext(type: $0.type, uri: $0.uri) },
+                playedAt: item.playedAt,
+                track: item.track.toAPITrack(),
+            )
+        }
+        return RecentlyPlayedResponse(items: items)
+    }
+}
+
+// Recommendations
+struct RecommendationsCodable: Decodable {
+    let tracks: [TrackCodable]
+}
+
+// Search results
+struct SearchResultsCodable: Decodable {
+    let tracks: TracksPagingCodable?
+    let albums: AlbumsPagingCodable?
+    let artists: ArtistsPagingCodable?
+    let playlists: PlaylistsPagingCodable?
+
+    struct TracksPagingCodable: Decodable {
+        let items: [TrackCodable]?
+    }
+
+    struct AlbumsPagingCodable: Decodable {
+        let items: [AlbumCodable]?
+    }
+
+    struct ArtistsPagingCodable: Decodable {
+        let items: [ArtistCodable]?
+    }
+
+    struct PlaylistsPagingCodable: Decodable {
+        let items: [PlaylistCodable]?
+    }
+}
+
 // MARK: - Errors
 
 /// Errors from Spotify API
