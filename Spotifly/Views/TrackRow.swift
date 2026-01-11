@@ -241,7 +241,7 @@ struct TrackRow: View {
                 } label: {
                     Label("track.menu.go_to_artist", systemImage: "person.circle")
                 }
-                .disabled(track.artistId == nil)
+                .disabled(track.artistId == nil || (currentSection == .artists && track.artistId == selectionId))
 
                 Button {
                     if let albumId = track.albumId {
@@ -254,7 +254,7 @@ struct TrackRow: View {
                 } label: {
                     Label("track.menu.go_to_album", systemImage: "square.stack")
                 }
-                .disabled(track.albumId == nil)
+                .disabled(track.albumId == nil || (currentSection == .albums && track.albumId == selectionId))
 
                 Divider()
 
