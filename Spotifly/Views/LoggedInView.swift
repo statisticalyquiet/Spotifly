@@ -212,7 +212,13 @@ struct LoggedInView: View {
     private func performSearch() {
         Task {
             let token = await session.validAccessToken()
+            #if DEBUG
+                print("[Search] Starting search for: \(searchText)")
+            #endif
             await searchService.search(accessToken: token, query: searchText)
+            #if DEBUG
+                print("[Search] After search - results: \(store.searchResults != nil), error: \(store.searchErrorMessage ?? "nil")")
+            #endif
             if store.searchResults != nil {
                 selectedNavigationItem = .searchResults
             }

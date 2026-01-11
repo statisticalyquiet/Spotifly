@@ -753,7 +753,8 @@ struct SearchResultsCodable: Decodable {
     }
 
     struct PlaylistsPagingCodable: Decodable {
-        let items: [PlaylistCodable]?
+        // Items can be null for deleted/unavailable playlists
+        let items: [PlaylistCodable?]?
     }
 }
 

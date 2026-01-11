@@ -139,9 +139,10 @@ extension SpotifyAPI {
                     )
                 } ?? []
 
-                // Convert playlists
-                let playlists: [Playlist] = decoded.playlists?.items?.map { playlist in
-                    Playlist(
+                // Convert playlists (filter out null items for deleted/unavailable playlists)
+                let playlists: [Playlist] = decoded.playlists?.items?.compactMap { playlist -> Playlist? in
+                    guard let playlist else { return nil }
+                    return Playlist(
                         id: playlist.id,
                         name: playlist.name,
                         description: playlist.description,
@@ -163,6 +164,12 @@ extension SpotifyAPI {
                     tracks: tracks,
                 )
             } catch {
+                #if DEBUG
+                    apiLogger.error("[Search] Decoding error: \(error)")
+                    if let jsonString = String(data: data, encoding: .utf8) {
+                        apiLogger.error("[Search] Response: \(jsonString.prefix(500))")
+                    }
+                #endif
                 throw SpotifyAPIError.invalidResponse
             }
         case 401:

@@ -64,7 +64,7 @@ enum NavigationItem: Hashable, Identifiable {
         case .albums:
             "square.stack.fill"
         case .artists:
-            "person.2.fill"
+            "mic.fill"
         case .queue:
             "list.bullet"
         case .speakers:
