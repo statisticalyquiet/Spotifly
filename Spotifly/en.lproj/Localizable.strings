@@ -27,12 +27,8 @@
 "nav.your_library" = "Your Library";
 
 /* Common Actions */
-"action.play" = "Play";
 "action.try_again" = "Try Again";
-"action.show_more" = "Show more";
-"action.show_less" = "Show less";
 "action.copy_token" = "Copy token to clipboard";
-"action.copy_track_uri" = "Copy track URI";
 "action.edit" = "Edit";
 "action.done" = "Done";
 "action.cancel" = "Cancel";
@@ -61,8 +57,6 @@
 "playback.play_track" = "Play Track";
 "playback.play_top_tracks" = "Play Top Tracks";
 "playback.play_tracks" = "Play Tracks";
-"playback.play_content" = "Play Spotify Content";
-"playback.uri_placeholder" = "Spotify URI or URL";
 
 /* Mini Player */
 "mini_player.enter" = "Enter mini player mode";
@@ -90,7 +84,6 @@
 
 /* Empty States */
 "empty.select_item" = "Select an item from the sidebar";
-"empty.select_search_result" = "Select a search result to see details";
 "empty.select_album" = "Select an album to see details";
 "empty.select_artist" = "Select an artist to see details";
 "empty.select_playlist" = "Select a playlist to see details";
@@ -131,7 +124,6 @@
 "section.artists" = "Artists";
 "section.playlists" = "Playlists";
 "section.top_tracks" = "Top Tracks";
-"section.all_tracks" = "All Tracks";
 
 /* Metadata */
 "metadata.tracks" = "%d tracks";
@@ -140,12 +132,8 @@
 "metadata.separator" = "•";
 
 /* Version Info */
-"version.label" = "Version %@ (%@)";
 "version.oauth_token" = "OAuth Access Token";
 "version.tap_count" = "Tap count: %d";
-
-/* Track Info */
-"track.id_label" = "Track ID:";
 
 /* Show All Button */
 "show_all.tracks" = "Show all %d tracks";
@@ -155,7 +143,6 @@
 "speakers.active" = "Active";
 "speakers.empty" = "No speakers found";
 "speakers.empty_hint" = "Open Spotify on another device to see it here";
-"speakers.error.not_logged_in" = "Not logged in";
 "speakers.error.failed_to_load" = "Failed to load speakers";
 "speakers.error.failed_to_transfer" = "Failed to transfer playback";
 "speakers.now_playing" = "Now Playing";

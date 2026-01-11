@@ -27,12 +27,8 @@
 "nav.your_library" = "Deine Bibliothek";
 
 /* Common Actions */
-"action.play" = "Abspielen";
 "action.try_again" = "Erneut versuchen";
-"action.show_more" = "Mehr anzeigen";
-"action.show_less" = "Weniger anzeigen";
 "action.copy_token" = "Token in Zwischenablage kopieren";
-"action.copy_track_uri" = "Track-URI kopieren";
 "action.edit" = "Bearbeiten";
 "action.done" = "Fertig";
 "action.cancel" = "Abbrechen";
@@ -61,8 +57,6 @@
 "playback.play_track" = "Track abspielen";
 "playback.play_top_tracks" = "Top-Tracks abspielen";
 "playback.play_tracks" = "Tracks abspielen";
-"playback.play_content" = "Spotify-Inhalt abspielen";
-"playback.uri_placeholder" = "Spotify-URI oder URL";
 
 /* Mini Player */
 "mini_player.enter" = "Mini-Player-Modus aktivieren";
@@ -90,7 +84,6 @@
 
 /* Empty States */
 "empty.select_item" = "Wähle ein Element aus der Seitenleiste";
-"empty.select_search_result" = "Wähle ein Suchergebnis für Details";
 "empty.select_album" = "Wähle ein Album für Details";
 "empty.select_artist" = "Wähle einen Künstler für Details";
 "empty.select_playlist" = "Wähle eine Playlist für Details";
@@ -131,7 +124,6 @@
 "section.artists" = "Künstler";
 "section.playlists" = "Playlists";
 "section.top_tracks" = "Top-Tracks";
-"section.all_tracks" = "Alle Tracks";
 
 /* Metadata */
 "metadata.tracks" = "%d Tracks";
@@ -140,12 +132,8 @@
 "metadata.separator" = "•";
 
 /* Version Info */
-"version.label" = "Version %@ (%@)";
 "version.oauth_token" = "OAuth-Zugriffstoken";
 "version.tap_count" = "Anzahl Klicks: %d";
-
-/* Track Info */
-"track.id_label" = "Track-ID:";
 
 /* Show All Button */
 "show_all.tracks" = "Alle %d Tracks anzeigen";
@@ -155,7 +143,6 @@
 "speakers.active" = "Aktiv";
 "speakers.empty" = "Keine Lautsprecher gefunden";
 "speakers.empty_hint" = "Öffne Spotify auf einem anderen Gerät, um es hier zu sehen";
-"speakers.error.not_logged_in" = "Nicht angemeldet";
 "speakers.error.failed_to_load" = "Lautsprecher konnten nicht geladen werden";
 "speakers.error.failed_to_transfer" = "Wiedergabe konnte nicht übertragen werden";
 "speakers.now_playing" = "Aktuell gespielt";
