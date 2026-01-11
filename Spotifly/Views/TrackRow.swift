@@ -183,87 +183,16 @@ struct TrackRow: View {
             .disabled(isTogglingFavorite)
             .opacity(isTogglingFavorite ? 0.5 : 1.0)
 
-            // Context menu
+            // Context menu (3-dot button)
             Menu {
-                Button {
-                    playNext()
-                } label: {
-                    Label("track.menu.play_next", systemImage: "text.line.first.and.arrowtriangle.forward")
-                }
-
-                Button {
-                    addToQueue()
-                } label: {
-                    Label("track.menu.add_to_queue", systemImage: "text.append")
-                }
-
-                Button {
-                    startSongRadio()
-                } label: {
-                    Label("track.menu.start_radio", systemImage: "antenna.radiowaves.left.and.right")
-                }
-
-                Divider()
-
-                // Playlist Management Section
-                Menu {
-                    Button {
-                        showNewPlaylistDialog = true
-                    } label: {
-                        Label("track.menu.add_to_new_playlist", systemImage: "plus")
-                    }
-
-                    // Show playlists from store
-                    let ownedPlaylists = store.userPlaylists.filter { $0.ownerId == session.userId }
-                    if !ownedPlaylists.isEmpty {
-                        Divider()
-
-                        ForEach(ownedPlaylists) { playlist in
-                            Button(playlist.name) {
-                                addToPlaylist(playlistId: playlist.id)
-                            }
-                        }
-                    }
-                } label: {
-                    Label("track.menu.add_to_playlist", systemImage: "music.note.list")
-                }
-
-                Divider()
-
-                Button {
-                    if let artistId = track.artistId {
-                        navigationCoordinator.navigateToArtistSection(
-                            artistId: artistId,
-                            from: currentSection,
-                            selectionId: selectionId,
-                        )
-                    }
-                } label: {
-                    Label("track.menu.go_to_artist", systemImage: "person.circle")
-                }
-                .disabled(track.artistId == nil || (currentSection == .artists && track.artistId == selectionId))
-
-                Button {
-                    if let albumId = track.albumId {
-                        navigationCoordinator.navigateToAlbumSection(
-                            albumId: albumId,
-                            from: currentSection,
-                            selectionId: selectionId,
-                        )
-                    }
-                } label: {
-                    Label("track.menu.go_to_album", systemImage: "square.stack")
-                }
-                .disabled(track.albumId == nil || (currentSection == .albums && track.albumId == selectionId))
-
-                Divider()
-
-                Button {
-                    copyToClipboard()
-                } label: {
-                    Label("action.share", systemImage: "square.and.arrow.up")
-                }
-                .disabled(track.externalUrl == nil)
+                TrackContextMenu(
+                    track: track,
+                    currentSection: currentSection,
+                    selectionId: selectionId,
+                    playbackViewModel: playbackViewModel,
+                    showNewPlaylistDialog: $showNewPlaylistDialog,
+                    onPlaylistAdded: showSuccessFeedback,
+                )
             } label: {
                 Image(systemName: showPlaylistAddedSuccess ? "checkmark.circle.fill" : "ellipsis")
                     .font(.caption)
@@ -282,6 +211,16 @@ struct TrackRow: View {
         .background(isCurrentTrack ? Color.green.opacity(0.1) : Color.clear)
         .opacity(isPlayedTrack ? 0.5 : 1.0)
         .contentShape(Rectangle())
+        .contextMenu {
+            TrackContextMenu(
+                track: track,
+                currentSection: currentSection,
+                selectionId: selectionId,
+                playbackViewModel: playbackViewModel,
+                showNewPlaylistDialog: $showNewPlaylistDialog,
+                onPlaylistAdded: showSuccessFeedback,
+            )
+        }
         .onTapGesture(count: 2) {
             handleDoubleTap()
         }
@@ -309,14 +248,6 @@ struct TrackRow: View {
         }
     }
 
-    private func copyToClipboard() {
-        guard let externalUrl = track.externalUrl else { return }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(externalUrl, forType: .string)
-    }
-
     private func handleDoubleTap() {
         switch doubleTapBehavior {
         case .playTrack:
@@ -338,61 +269,6 @@ struct TrackRow: View {
         }
     }
 
-    private func playNext() {
-        Task {
-            let token = await session.validAccessToken()
-            await playbackViewModel.playNext(
-                trackUri: track.uri,
-                accessToken: token,
-            )
-        }
-    }
-
-    private func addToQueue() {
-        Task {
-            let token = await session.validAccessToken()
-            await playbackViewModel.addToQueue(
-                trackUri: track.uri,
-                accessToken: token,
-            )
-        }
-    }
-
-    private func startSongRadio() {
-        Task {
-            do {
-                let token = await session.validAccessToken()
-
-                // Ensure player is initialized (needed for radio API)
-                await playbackViewModel.initializeIfNeeded(accessToken: token)
-
-                // Use librespot's internal radio API
-                let radioTrackUris = try SpotifyPlayer.getRadioTracks(trackUri: track.uri)
-
-                if !radioTrackUris.isEmpty {
-                    // Filter out the base track if it's already in the radio results
-                    let filteredRadioUris = radioTrackUris.filter { $0 != track.uri }
-
-                    // Play the current track followed by radio tracks
-                    var trackUris = [track.uri]
-                    trackUris.append(contentsOf: filteredRadioUris)
-
-                    await playbackViewModel.playTracks(
-                        trackUris,
-                        accessToken: token,
-                    )
-
-                    // Navigate to queue to show radio tracks
-                    navigationCoordinator.navigateToQueue()
-                } else {
-                    playbackViewModel.errorMessage = "No radio tracks found"
-                }
-            } catch {
-                playbackViewModel.errorMessage = "Failed to start radio: \(error.localizedDescription)"
-            }
-        }
-    }
-
     /// Toggle favorite using TrackService (optimistic update)
     private func toggleFavorite() {
         Task {
@@ -410,25 +286,6 @@ struct TrackRow: View {
             }
 
             isTogglingFavorite = false
-        }
-    }
-
-    /// Add track to playlist using PlaylistService
-    private func addToPlaylist(playlistId: String) {
-        Task {
-            isAddingToPlaylist = true
-            do {
-                let token = await session.validAccessToken()
-                try await playlistService.addTracksToPlaylist(
-                    playlistId: playlistId,
-                    trackIds: [track.trackId],
-                    accessToken: token,
-                )
-                showSuccessFeedback()
-            } catch {
-                playbackViewModel.errorMessage = "Failed to add to playlist: \(error.localizedDescription)"
-            }
-            isAddingToPlaylist = false
         }
     }
 
@@ -508,3 +365,4 @@ extension APITrack {
         )
     }
 }
+

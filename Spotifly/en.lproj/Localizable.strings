@@ -43,6 +43,8 @@
 "track.menu.play_next" = "Play Next";
 "track.menu.add_to_queue" = "Add to Queue";
 "track.menu.start_radio" = "Start Song Radio";
+"track.menu.add_to_favorites" = "Add to Favorites";
+"track.menu.remove_from_favorites" = "Remove from Favorites";
 "track.menu.add_to_playlist" = "Add to Playlist";
 "track.menu.add_to_new_playlist" = "Add to New Playlist...";
 "track.menu.go_to_artist" = "Go to Artist";

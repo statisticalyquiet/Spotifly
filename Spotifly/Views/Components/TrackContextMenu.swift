@@ -1,0 +1,228 @@
+//
+//  TrackContextMenu.swift
+//  Spotifly
+//
+//  Reusable context menu for tracks - used in TrackRow and on cards
+//
+
+import SwiftUI
+
+/// Reusable context menu content for tracks
+struct TrackContextMenu: View {
+    let track: TrackRowData
+    let currentSection: NavigationItem
+    let selectionId: String?
+    @Bindable var playbackViewModel: PlaybackViewModel
+
+    @Environment(NavigationCoordinator.self) private var navigationCoordinator
+    @Environment(SpotifySession.self) private var session
+    @Environment(AppStore.self) private var store
+    @Environment(TrackService.self) private var trackService
+    @Environment(PlaylistService.self) private var playlistService
+
+    @Binding var showNewPlaylistDialog: Bool
+    var onPlaylistAdded: (() -> Void)?
+
+    /// Favorite status from the store
+    private var isFavorited: Bool {
+        store.isFavorite(track.trackId)
+    }
+
+    var body: some View {
+        Button {
+            playNext()
+        } label: {
+            Label("track.menu.play_next", systemImage: "text.line.first.and.arrowtriangle.forward")
+        }
+
+        Button {
+            addToQueue()
+        } label: {
+            Label("track.menu.add_to_queue", systemImage: "text.append")
+        }
+
+        Button {
+            startSongRadio()
+        } label: {
+            Label("track.menu.start_radio", systemImage: "antenna.radiowaves.left.and.right")
+        }
+
+        Divider()
+
+        // Favorite toggle
+        Button {
+            toggleFavorite()
+        } label: {
+            Label(
+                isFavorited ? "track.menu.remove_from_favorites" : "track.menu.add_to_favorites",
+                systemImage: isFavorited ? "heart.slash" : "heart"
+            )
+        }
+
+        // Playlist Management Section
+        Menu {
+            Button {
+                showNewPlaylistDialog = true
+            } label: {
+                Label("track.menu.add_to_new_playlist", systemImage: "plus")
+            }
+
+            // Show playlists from store
+            let ownedPlaylists = store.userPlaylists.filter { $0.ownerId == session.userId }
+            if !ownedPlaylists.isEmpty {
+                Divider()
+
+                ForEach(ownedPlaylists) { playlist in
+                    Button(playlist.name) {
+                        addToPlaylist(playlistId: playlist.id)
+                    }
+                }
+            }
+        } label: {
+            Label("track.menu.add_to_playlist", systemImage: "music.note.list")
+        }
+
+        Divider()
+
+        Button {
+            if let artistId = track.artistId {
+                navigationCoordinator.navigateToArtistSection(
+                    artistId: artistId,
+                    from: currentSection,
+                    selectionId: selectionId,
+                )
+            }
+        } label: {
+            Label("track.menu.go_to_artist", systemImage: "person.circle")
+        }
+        .disabled(track.artistId == nil || (currentSection == .artists && track.artistId == selectionId))
+
+        Button {
+            if let albumId = track.albumId {
+                navigationCoordinator.navigateToAlbumSection(
+                    albumId: albumId,
+                    from: currentSection,
+                    selectionId: selectionId,
+                )
+            }
+        } label: {
+            Label("track.menu.go_to_album", systemImage: "square.stack")
+        }
+        .disabled(track.albumId == nil || (currentSection == .albums && track.albumId == selectionId))
+
+        Divider()
+
+        Button {
+            copyToClipboard()
+        } label: {
+            Label("action.share", systemImage: "square.and.arrow.up")
+        }
+        .disabled(track.externalUrl == nil)
+    }
+
+    // MARK: - Actions
+
+    private func copyToClipboard() {
+        guard let externalUrl = track.externalUrl else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(externalUrl, forType: .string)
+    }
+
+    private func playNext() {
+        Task {
+            let token = await session.validAccessToken()
+            await playbackViewModel.playNext(
+                trackUri: track.uri,
+                accessToken: token,
+            )
+        }
+    }
+
+    private func addToQueue() {
+        Task {
+            let token = await session.validAccessToken()
+            await playbackViewModel.addToQueue(
+                trackUri: track.uri,
+                accessToken: token,
+            )
+        }
+    }
+
+    private func startSongRadio() {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                await playbackViewModel.initializeIfNeeded(accessToken: token)
+
+                let radioTrackUris = try SpotifyPlayer.getRadioTracks(trackUri: track.uri)
+
+                if !radioTrackUris.isEmpty {
+                    let filteredRadioUris = radioTrackUris.filter { $0 != track.uri }
+                    var trackUris = [track.uri]
+                    trackUris.append(contentsOf: filteredRadioUris)
+
+                    await playbackViewModel.playTracks(
+                        trackUris,
+                        accessToken: token,
+                    )
+
+                    navigationCoordinator.navigateToQueue()
+                } else {
+                    playbackViewModel.errorMessage = "No radio tracks found"
+                }
+            } catch {
+                playbackViewModel.errorMessage = "Failed to start radio: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func toggleFavorite() {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                try await trackService.toggleFavorite(
+                    trackId: track.trackId,
+                    accessToken: token,
+                )
+            } catch {
+                playbackViewModel.errorMessage = "Failed to update favorite: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func addToPlaylist(playlistId: String) {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                try await playlistService.addTracksToPlaylist(
+                    playlistId: playlistId,
+                    trackIds: [track.trackId],
+                    accessToken: token,
+                )
+                onPlaylistAdded?()
+            } catch {
+                playbackViewModel.errorMessage = "Failed to add to playlist: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+// MARK: - Convenience initializer with constant binding
+
+extension TrackContextMenu {
+    /// Initialize without playlist dialog support (for context menus)
+    init(
+        track: TrackRowData,
+        currentSection: NavigationItem = .startpage,
+        selectionId: String? = nil,
+        playbackViewModel: PlaybackViewModel
+    ) {
+        self.track = track
+        self.currentSection = currentSection
+        self.selectionId = selectionId
+        self.playbackViewModel = playbackViewModel
+        _showNewPlaylistDialog = .constant(false)
+        onPlaylistAdded = nil
+    }
+}

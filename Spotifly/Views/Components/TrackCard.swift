@@ -9,7 +9,8 @@ import SwiftUI
 
 struct TrackCard: View {
     let track: Track
-    let playbackViewModel: PlaybackViewModel
+    @Bindable var playbackViewModel: PlaybackViewModel
+    var currentSection: NavigationItem = .searchResults
 
     @Environment(SpotifySession.self) private var session
 
@@ -55,6 +56,14 @@ struct TrackCard: View {
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            TrackContextMenu(
+                track: track.toTrackRowData(),
+                currentSection: currentSection,
+                selectionId: nil,
+                playbackViewModel: playbackViewModel,
+            )
+        }
     }
 
     private var trackPlaceholder: some View {
