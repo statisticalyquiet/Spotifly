@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PreferencesView: View {
     var body: some View {
@@ -117,22 +118,82 @@ struct SpeakersSettingsView: View {
 
 // MARK: - Startpage Settings Tab
 
+/// Identifiers for startpage sections
+enum StartpageSection: String, CaseIterable, Identifiable, Codable {
+    case topArtists
+    case recentlyPlayed
+    case newReleases
+
+    var id: String { rawValue }
+
+    var titleKey: LocalizedStringKey {
+        switch self {
+        case .topArtists: "startpage.top_artists"
+        case .recentlyPlayed: "recently_played.content"
+        case .newReleases: "startpage.new_releases"
+        }
+    }
+
+    var enabledKey: String {
+        switch self {
+        case .topArtists: "showTopArtists"
+        case .recentlyPlayed: "showRecentlyPlayed"
+        case .newReleases: "showNewReleases"
+        }
+    }
+
+    /// Default order of sections
+    static var defaultOrder: [StartpageSection] {
+        [.topArtists, .recentlyPlayed, .newReleases]
+    }
+}
+
 struct StartpageSettingsView: View {
     @AppStorage("showTopArtists") private var showTopArtists: Bool = true
     @AppStorage("showRecentlyPlayed") private var showRecentlyPlayed: Bool = true
     @AppStorage("showNewReleases") private var showNewReleases: Bool = true
+    @AppStorage("startpageSectionOrder") private var sectionOrderData: Data = .init()
+
+    @State private var sections: [StartpageSection] = StartpageSection.defaultOrder
+    @State private var draggingSection: StartpageSection?
+
+    /// Whether any section is enabled
+    private var hasAnySectionEnabled: Bool {
+        showTopArtists || showRecentlyPlayed || showNewReleases
+    }
 
     var body: some View {
         Form {
             Section {
-                Toggle("startpage.top_artists", isOn: $showTopArtists)
-                Toggle("recently_played.content", isOn: $showRecentlyPlayed)
-                Toggle("startpage.new_releases", isOn: $showNewReleases)
+                ForEach(sections) { section in
+                    HStack(spacing: 12) {
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundStyle(.tertiary)
+                            .font(.body)
+
+                        Toggle(section.titleKey, isOn: bindingForSection(section))
+
+                        Spacer()
+                    }
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
+                    .opacity(draggingSection == section ? 0.5 : 1.0)
+                    .onDrag {
+                        draggingSection = section
+                        return NSItemProvider(object: section.rawValue as NSString)
+                    }
+                    .onDrop(of: [.text], delegate: SectionDropDelegate(
+                        item: section,
+                        sections: $sections,
+                        draggingSection: $draggingSection,
+                        onReorder: saveSectionOrder
+                    ))
+                }
             } header: {
                 Text("preferences.startpage.sections")
             }
 
-            if !showTopArtists, !showRecentlyPlayed, !showNewReleases {
+            if !hasAnySectionEnabled {
                 Section {
                     Text("preferences.startpage.none_enabled")
                         .font(.caption)
@@ -141,6 +202,71 @@ struct StartpageSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            loadSectionOrder()
+        }
+    }
+
+    private func bindingForSection(_ section: StartpageSection) -> Binding<Bool> {
+        switch section {
+        case .topArtists:
+            $showTopArtists
+        case .recentlyPlayed:
+            $showRecentlyPlayed
+        case .newReleases:
+            $showNewReleases
+        }
+    }
+
+    private func loadSectionOrder() {
+        guard !sectionOrderData.isEmpty,
+              let order = try? JSONDecoder().decode([StartpageSection].self, from: sectionOrderData)
+        else {
+            sections = StartpageSection.defaultOrder
+            return
+        }
+        // Ensure all sections are present (in case new ones were added)
+        var loadedSections = order.filter { StartpageSection.allCases.contains($0) }
+        for section in StartpageSection.allCases where !loadedSections.contains(section) {
+            loadedSections.append(section)
+        }
+        sections = loadedSections
+    }
+
+    private func saveSectionOrder() {
+        if let data = try? JSONEncoder().encode(sections) {
+            sectionOrderData = data
+        }
+    }
+}
+
+/// Drop delegate for reordering startpage sections
+struct SectionDropDelegate: DropDelegate {
+    let item: StartpageSection
+    @Binding var sections: [StartpageSection]
+    @Binding var draggingSection: StartpageSection?
+    let onReorder: () -> Void
+
+    func performDrop(info _: DropInfo) -> Bool {
+        draggingSection = nil
+        onReorder()
+        return true
+    }
+
+    func dropEntered(info _: DropInfo) {
+        guard let dragging = draggingSection,
+              dragging != item,
+              let fromIndex = sections.firstIndex(of: dragging),
+              let toIndex = sections.firstIndex(of: item)
+        else { return }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            sections.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+        }
+    }
+
+    func dropUpdated(info _: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
     }
 }
 

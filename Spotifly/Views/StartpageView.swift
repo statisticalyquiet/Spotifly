@@ -19,6 +19,7 @@ struct StartpageView: View {
     @AppStorage("showTopArtists") private var showTopArtists: Bool = true
     @AppStorage("showRecentlyPlayed") private var showRecentlyPlayed: Bool = true
     @AppStorage("showNewReleases") private var showNewReleases: Bool = true
+    @AppStorage("startpageSectionOrder") private var sectionOrderData: Data = .init()
 
     @State private var versionTapCount = 0
     @State private var showTokenInfo = false
@@ -28,23 +29,38 @@ struct StartpageView: View {
         showTopArtists || showRecentlyPlayed || showNewReleases
     }
 
+    /// Ordered list of sections from preferences
+    private var orderedSections: [StartpageSection] {
+        guard !sectionOrderData.isEmpty,
+              let order = try? JSONDecoder().decode([StartpageSection].self, from: sectionOrderData)
+        else {
+            return StartpageSection.defaultOrder
+        }
+        // Ensure all sections are present
+        var sections = order.filter { StartpageSection.allCases.contains($0) }
+        for section in StartpageSection.allCases where !sections.contains(section) {
+            sections.append(section)
+        }
+        return sections
+    }
+
+    /// Check if a section is enabled
+    private func isSectionEnabled(_ section: StartpageSection) -> Bool {
+        switch section {
+        case .topArtists: showTopArtists
+        case .recentlyPlayed: showRecentlyPlayed
+        case .newReleases: showNewReleases
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if hasAnySectionEnabled {
-                    // Top Artists Section
-                    if showTopArtists {
-                        topArtistsSection
-                    }
-
-                    // Recently Played (albums and playlists only)
-                    if showRecentlyPlayed {
-                        recentlyPlayedSection
-                    }
-
-                    // New Releases Section
-                    if showNewReleases {
-                        newReleasesSection
+                    ForEach(orderedSections) { section in
+                        if isSectionEnabled(section) {
+                            sectionView(for: section)
+                        }
                     }
                 } else {
                     // Empty state when no sections are enabled
@@ -67,6 +83,18 @@ struct StartpageView: View {
             if showRecentlyPlayed {
                 await recentlyPlayedService.refresh(accessToken: token)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionView(for section: StartpageSection) -> some View {
+        switch section {
+        case .topArtists:
+            topArtistsSection
+        case .recentlyPlayed:
+            recentlyPlayedSection
+        case .newReleases:
+            newReleasesSection
         }
     }
 
