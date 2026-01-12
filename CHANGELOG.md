@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-01-12
+
+### Added
+- User-facing README with screenshots, download links, and setup guide
+- DEVELOPMENT.md with architecture and build documentation
+- Images directory with screenshots for GitHub page
+
+### Changed
+- Releases now published to main repo (ralph/spotifly) instead of homebrew-spotifly
+- Updated release process documentation in CLAUDE.md
+
 ## [1.1.7] - 2026-01-09
 
 ### Added
