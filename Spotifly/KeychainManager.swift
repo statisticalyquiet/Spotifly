@@ -15,6 +15,10 @@ enum KeychainManager {
     private static let refreshTokenKey = "spotify_refresh_token"
     private static let expiresAtKey = "spotify_expires_at"
 
+    /// Shared keychain access group - allows both dev and release builds to access the same items
+    /// Format: TeamID.groupName (must match keychain-access-groups in entitlements)
+    private static let accessGroup = "89S4HZY343.com.spotifly.keychain"
+
     // MARK: - Public API
 
     /// Saves the OAuth result to the keychain
@@ -121,6 +125,7 @@ enum KeychainManager {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.spotifly.config",
             kSecAttrAccount as String: "spotify_custom_client_id",
+            kSecAttrAccessGroup as String: "89S4HZY343.com.spotifly.keychain",
             kSecValueData as String: clientId.data(using: .utf8)!,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
@@ -137,6 +142,7 @@ enum KeychainManager {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.spotifly.config",
             kSecAttrAccount as String: "spotify_custom_client_id",
+            kSecAttrAccessGroup as String: "89S4HZY343.com.spotifly.keychain",
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -159,6 +165,7 @@ enum KeychainManager {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.spotifly.config",
             kSecAttrAccount as String: "spotify_custom_client_id",
+            kSecAttrAccessGroup as String: "89S4HZY343.com.spotifly.keychain",
         ]
         SecItemDelete(query as CFDictionary)
     }
@@ -173,6 +180,7 @@ enum KeychainManager {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
+            kSecAttrAccessGroup as String: accessGroup,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
@@ -189,6 +197,7 @@ enum KeychainManager {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
+            kSecAttrAccessGroup as String: accessGroup,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -208,6 +217,7 @@ enum KeychainManager {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
+            kSecAttrAccessGroup as String: accessGroup,
         ]
 
         SecItemDelete(query as CFDictionary)
