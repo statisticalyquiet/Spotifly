@@ -18,7 +18,7 @@ Release a new version of Spotifly.
 3. **Bump version in Xcode project**:
    - Update all `MARKETING_VERSION` entries in `Spotifly.xcodeproj/project.pbxproj` to the new version
 
-4. **Update ../homebrew-spotifly/CHANGELOG.md**:
+4. **Update ../homebrew-spotifly/CHANGELOG.md** (temporary, until app is in official Homebrew):
    - Add a new version section with today's date
    - Summarize only user-visible changes (brief, one line each)
    - Features go under `### Added`
@@ -30,4 +30,9 @@ Release a new version of Spotifly.
    - In this repo: `git add CHANGELOG.md Spotifly.xcodeproj/project.pbxproj && git commit -m "Bump version to [version]"`
    - In ../homebrew-spotifly: `git add CHANGELOG.md && git commit -m "Add v[version] to changelog"`
 
-6. **Report**: Show the user what was done and remind them to push both repos
+6. **Report and remind user**:
+   - Show what was done
+   - Remind them to:
+     1. Push both repos
+     2. Create a GitHub Release in **this repo** (ralph/spotifly) with the built .zip artifact
+     3. Update the Homebrew formula in homebrew-spotifly to point to the new release URL and update the SHA256

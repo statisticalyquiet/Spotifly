@@ -79,6 +79,23 @@ struct MyView: View {
 3. **Favorites require tracks in store** - `store.isFavorite(trackId)` only works if track was loaded via a service
 4. **Favorites loaded on startup** - `LoggedInView` loads favorites so heart indicators work everywhere
 
+### Network Request Deduplication
+
+Views using `.task` to load data need protection against duplicate requests. The approach depends on whether the view's layout can change:
+
+- **Stable views** (no layout changes): Simple `guard !store.xxxPagination.isLoading` in the service is sufficient
+- **Layout-switching views** (Albums/Artists/Playlists trigger 2→3 column switch): The service must store the `Task` reference and be persisted via `@State` in a parent view, because view recreation can re-trigger `.task` before `isLoading` is set
+
+The stored task pattern in `AlbumService`/`ArtistService`/`PlaylistService`:
+```swift
+if let existingTask = userAlbumsTask {
+    _ = try? await existingTask.value  // Await existing, don't start new
+    return
+}
+```
+
+These services are stored as `@State` in `LoggedInView` so the task reference survives view recreation. If adding a new section that changes the column layout, use this pattern.
+
 ## Changelog & Releases
 
 ### Changelog Management
@@ -86,7 +103,6 @@ struct MyView: View {
 - Keep `CHANGELOG.md` in this repo up to date with all changes (detailed, technical notes welcome)
 - Use [Keep a Changelog](https://keepachangelog.com/) format with sections: Added, Changed, Fixed, Removed
 - Add entries under `## [Unreleased]` as you work
-- The changelog in `../homebrew-spotifly/CHANGELOG.md` is user-facing and should only contain brief, user-visible changes
 
 ### Release Process
 
@@ -95,8 +111,17 @@ When ready to release, run: `/release [version]` (e.g., `/release 1.1.5`)
 This will:
 1. Move `[Unreleased]` entries to a new version section with today's date
 2. Bump `MARKETING_VERSION` in the Xcode project
-3. Summarize changes for `../homebrew-spotifly/CHANGELOG.md`:
-   - Only user-visible features and fixes
-   - Keep descriptions brief (one line each)
-   - Group minor fixes as "Bug fixes and performance improvements" if needed
+3. Update `../homebrew-spotifly/CHANGELOG.md` with user-facing summary (temporary)
 4. Commit both repos
+
+After `/release`, you must:
+1. Push both repos
+2. Create a GitHub Release in this repo with the built .zip artifact
+3. Update the Homebrew formula in homebrew-spotifly (URL + SHA256)
+
+### About homebrew-spotifly
+
+The `../homebrew-spotifly` repo is temporary scaffolding for the Homebrew tap. Once the app is accepted into official Homebrew, it will be deleted. Until then:
+- Releases are published to **this repo** (ralph/spotifly)
+- The homebrew-spotifly repo only contains the tap formula and a user-facing changelog
+- Both changelogs are updated during `/release`

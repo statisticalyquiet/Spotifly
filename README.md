@@ -1,140 +1,114 @@
 # Spotifly
 
-A Swift/SwiftUI app that integrates with Spotify using the [librespot](https://github.com/librespot-org/librespot) Rust library for OAuth authentication.
+A lightweight Spotify player for macOS.
+
+> [!IMPORTANT]
+> **Spotify Client ID Required**
+> This app requires your own Spotify Client ID to function. See [Setting Up Your Client ID](#setting-up-your-client-id) below for instructions.
+
+## Screenshots
+
+### Album View
+![Album View](images/screenshot-album-view.png)
+
+### Miniplayer
+![Miniplayer](images/screenshot-miniplayer.png)
 
 ## Installation
 
-Install via Homebrew from [homebrew-spotifly](https://github.com/ralph/homebrew-spotifly):
+### Direct Download
+
+1. Download the [latest release](https://github.com/ralph/spotifly/releases/latest)
+2. Extract the ZIP file
+3. Move `Spotifly.app` to your Applications folder
+4. Open Spotifly from Applications
+
+### Homebrew
 
 ```bash
-brew tap ralph/spotifly
-brew install spotifly
+brew install ralph/spotifly/spotifly
 ```
 
-## Architecture
+## Requirements
 
-This project demonstrates Swift 6.2's C interoperability to call Rust code:
+- macOS 26.2 or later
+- Spotify Premium account
 
-```
-┌─────────────────────┐
-│     SwiftUI App     │
-│   (ContentView)     │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│   SpotifyAuth.swift │
-│  (Swift wrapper)    │
-└──────────┬──────────┘
-           │ C FFI
-┌──────────▼──────────┐
-│   SpotiflyRust      │
-│  (C module map)     │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│   libspotifly_rust  │
-│  (Rust static lib)  │
-│  + librespot-oauth  │
-└─────────────────────┘
-```
+## Features
 
-## Prerequisites
+- Lightweight and fast
+- Native macOS app built with SwiftUI
+- Spotify Web API integration
+- Recently played tracks, albums, artists, and playlists
+- Queue management with drag-and-drop reordering
+- Playback controls
+- Search functionality
+- Favorites management
 
-- Xcode 26.2+ (Swift 6.2)
-- Rust toolchain (install via [rustup](https://rustup.rs/))
-- macOS 26.2+ (or adjust deployment target)
+## Setting Up Your Client ID
 
-## Building
+Spotifly requires a Spotify Client ID. While it's recommended to create a new Spotify app just for Spotifly, you can also use an existing Spotify app—just add `de.rvdh.spotifly://callback` to its Redirect URIs (you can have multiple redirect URIs in one app).
 
-### 1. Build the Rust library first
+### Option A: Create a New Spotify App (Recommended)
 
-```bash
-cd rust
-./build.sh
-```
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/)
+2. Click **Create app**
+3. Fill in the required fields:
+   - **App name**: Anything you like (e.g., "Spotifly")
+   - **App description**: Anything you like
+   - **Redirect URIs**: Add exactly `de.rvdh.spotifly://callback`
+   - **APIs used**: Select **Web API** and **Web Playback SDK**
+4. Accept the terms and click **Save**
+5. Open your newly created app and go to **Settings**
+6. Copy the **Client ID** (not the Client Secret)
 
-This compiles the Rust code into a static library at `build/rust/lib/libspotifly_rust.a`.
+All other fields (Website, Bundle IDs, Android packages) can be left empty.
 
-### 2. Build the Swift app
+![Spotify Developer App Settings](images/spotify-developer-app-settings.png)
 
-Open `Spotifly.xcodeproj` in Xcode and build (⌘B), or:
+### Option B: Use an Existing Spotify App
 
-```bash
-xcodebuild -scheme Spotifly -destination 'platform=macOS' build
-```
+If you already have a Spotify app configured:
 
-## Project Structure
+1. Go to your app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/)
+2. Go to **Settings**
+3. Add `de.rvdh.spotifly://callback` to the **Redirect URIs** (you can have multiple)
+4. Save the settings
+5. Copy the **Client ID**
 
-```
-Spotifly/
-├── Spotifly/                    # Swift source files
-│   ├── SpotiflyApp.swift        # App entry point
-│   ├── ContentView.swift        # Main UI with OAuth button
-│   └── SpotifyAuth.swift        # Swift wrapper for Rust FFI
-├── rust/                        # Rust library source
-│   ├── Cargo.toml               # Rust dependencies
-│   ├── src/lib.rs               # Rust FFI implementation
-│   ├── include/spotifly_rust.h  # C header for FFI
-│   └── build.sh                 # Build script
-├── build/rust/                  # Built Rust artifacts
-│   ├── lib/libspotifly_rust.a   # Static library
-│   └── include/                 # Headers + module map
-└── Spotifly.xcodeproj           # Xcode project
-```
+### Configure Spotifly
 
-## How it Works
+1. Open Spotifly
+2. Enter your Client ID on the login screen
+3. Click **Connect with Spotify**
 
-1. **Rust Layer** (`rust/src/lib.rs`):
-   - Uses `librespot-oauth` crate for Spotify OAuth with PKCE
-   - Exposes C-compatible functions (`extern "C"`)
-   - Manages async Tokio runtime internally
+Your Client ID will be saved securely in the macOS Keychain and used for all future sessions.
 
-2. **C Header** (`rust/include/spotifly_rust.h`):
-   - Declares the C function signatures
-   - Used by Swift via a module map
+## Keyboard Shortcuts
 
-3. **Swift Wrapper** (`Spotifly/SpotifyAuth.swift`):
-   - Imports the `SpotiflyRust` C module
-   - Provides a Swift-native async API using `@globalActor`
-   - Follows Swift 6.2 concurrency best practices
+### Playback
 
-4. **SwiftUI** (`Spotifly/ContentView.swift`):
-   - Uses `@Observable` for state management
-   - `@MainActor` isolated view model
-   - Initiates OAuth flow on button press
+| Shortcut | Action |
+|----------|--------|
+| Space | Play / Pause |
+| ⌘ → | Next track |
+| ⌘ ← | Previous track |
+| ⌘ L | Like / Unlike current track |
 
-## OAuth Flow
+### Navigation
 
-When you click "Connect with Spotify":
+| Shortcut | Action |
+|----------|--------|
+| ⌘ 1 | Go to Favorites |
+| ⌘ 2 | Go to Playlists |
+| ⌘ 3 | Go to Albums |
+| ⌘ 4 | Go to Artists |
+| ⌘ F | Focus search field |
+| ⌘ R | Refresh (on startpage) |
 
-1. The Rust library starts a local HTTP server on `http://127.0.0.1:8888`
-2. Opens Spotify's OAuth page in your browser
-3. After authentication, Spotify redirects to the local server
-4. The library captures the authorization code and exchanges it for tokens
-5. Access token is returned to Swift and displayed in the UI
+## Development
 
-## Xcode Build Settings
-
-The following settings are configured in the Xcode project:
-
-- **Library Search Paths**: `$(PROJECT_DIR)/build/rust/lib`
-- **Swift Include Paths**: `$(PROJECT_DIR)/build/rust/include`
-- **Other Linker Flags**: 
-  - `-lspotifly_rust`
-  - `-framework SystemConfiguration`
-  - `-framework Security`
-  - `-framework CoreFoundation`
-
-## Spotify Client ID
-
-This app requires your own Spotify Client ID to function. See the [setup instructions](https://github.com/ralph/homebrew-spotifly?tab=readme-ov-file#setting-up-your-client-id) for details on creating a Spotify app.
-
-**Note:** While it's recommended to create a new Spotify app just for Spotifly, you can also use an existing Spotify app. Just add `de.rvdh.spotifly://callback` to its Redirect URIs (you can have multiple redirect URIs).
-
-## Notes
-
-- The app sandbox is enabled, but you may need to disable it or add network entitlements for the OAuth flow to work properly
-- Currently builds for macOS only; iOS would require cross-compilation of the Rust library
+See [DEVELOPMENT.md](DEVELOPMENT.md) for build instructions and architecture documentation.
 
 ## License
 
