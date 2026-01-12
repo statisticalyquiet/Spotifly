@@ -11,9 +11,11 @@
 # REQUIREMENTS:
 #   - Xcode installed with Apple Developer account configured
 #   - GitHub CLI (gh) installed and authenticated
-#   - Write access to ralph/homebrew-spotifly repository
+#   - Write access to ralph/spotifly and ralph/homebrew-spotifly repositories
 #
 # The build is signed with Developer ID and notarized by Apple.
+# Releases are published to ralph/spotifly (main repo).
+# The homebrew-spotifly formula is updated to point to the new release.
 
 set -e  # Exit on error
 
@@ -36,7 +38,7 @@ echo -e "\n${YELLOW}Current version: ${VERSION}${NC}"
 
 # Check if this version already exists as a release
 REPLACE_EXISTING=false
-if gh release view "v${VERSION}" --repo ralph/homebrew-spotifly &> /dev/null; then
+if gh release view "v${VERSION}" --repo ralph/spotifly &> /dev/null; then
     echo -e "${YELLOW}Warning: Release v${VERSION} already exists!${NC}"
     read -p "Do you want to replace it? (y/N): " -n 1 -r
     echo
@@ -122,21 +124,22 @@ echo -e "${GREEN}SHA256: ${SHA256}${NC}"
 # Delete existing release if replacing
 if [ "$REPLACE_EXISTING" = true ]; then
     echo -e "\n${YELLOW}Deleting existing release v${VERSION}...${NC}"
+    gh release delete "v${VERSION}" --yes --repo ralph/spotifly 2>/dev/null || true
     gh release delete "v${VERSION}" --yes --repo ralph/homebrew-spotifly 2>/dev/null || true
-    # Also delete the tag
-    git push --delete origin "v${VERSION}" --repo ralph/homebrew-spotifly 2>/dev/null || true
+    # Also delete the tags
+    git push --delete origin "v${VERSION}" 2>/dev/null || true
 fi
 
 # Extract changelog entry for this version
-CHANGELOG_FILE="$HOME/code/spotifly/homebrew-spotifly/CHANGELOG.md"
+CHANGELOG_FILE="$HOME/code/spotifly/repos/CHANGELOG.md"
 CHANGELOG_ENTRY=""
 if [ -f "$CHANGELOG_FILE" ]; then
     # Extract the section for this version (from ## [VERSION] to next ## or end)
     CHANGELOG_ENTRY=$(awk "/^## \[${VERSION}\]/{flag=1; next} /^## \[/{flag=0} flag" "$CHANGELOG_FILE")
 fi
 
-# Create GitHub release
-echo -e "\n${YELLOW}Creating GitHub release v${VERSION}...${NC}"
+# Create GitHub releases (both main repo and homebrew-spotifly for now)
+echo -e "\n${YELLOW}Creating GitHub release v${VERSION} on ralph/spotifly...${NC}"
 
 gh release create "v${VERSION}" \
     "${ZIP_NAME}" \
@@ -147,16 +150,60 @@ ${CHANGELOG_ENTRY}
 
 ## Download and Install
 
-- **Homebrew (recommended)**: \`brew install ralph/spotifly/spotifly\`
+- **Homebrew**: \`brew install ralph/spotifly/spotifly\`
 - **Manual**: Download Spotifly-${VERSION}.zip, extract, and move to Applications
 
 **Note:** This version is signed and notarized with Apple Developer ID. No Gatekeeper warnings!
 
-[Full Changelog](https://github.com/ralph/homebrew-spotifly/blob/main/CHANGELOG.md)" \
+[Full Changelog](https://github.com/ralph/spotifly/blob/main/CHANGELOG.md)" \
+    --repo ralph/spotifly
+
+# Also create on homebrew-spotifly (temporary, until app is in official Homebrew)
+echo -e "${YELLOW}Creating GitHub release v${VERSION} on ralph/homebrew-spotifly...${NC}"
+gh release delete "v${VERSION}" --yes --repo ralph/homebrew-spotifly 2>/dev/null || true
+
+gh release create "v${VERSION}" \
+    "${ZIP_NAME}" \
+    --title "Spotifly ${VERSION}" \
+    --notes "## What's New
+
+${CHANGELOG_ENTRY}
+
+## Download and Install
+
+- **Homebrew**: \`brew install ralph/spotifly/spotifly\`
+- **Manual**: Download Spotifly-${VERSION}.zip, extract, and move to Applications
+
+**Note:** This version is signed and notarized with Apple Developer ID. No Gatekeeper warnings!
+
+[Full Changelog](https://github.com/ralph/spotifly/blob/main/CHANGELOG.md)" \
     --repo ralph/homebrew-spotifly
 
-# Also tag as latest
+# Update 'latest' tag on both repos
 echo -e "${YELLOW}Updating 'latest' tag...${NC}"
+cp "${ZIP_NAME}" "Spotifly-latest.zip"
+
+# Main repo
+gh release delete latest --yes --repo ralph/spotifly 2>/dev/null || true
+gh release create latest \
+    "${ZIP_NAME}" \
+    --title "Spotifly (Latest)" \
+    --notes "Latest stable release of Spotifly (v${VERSION})
+
+## What's New
+
+${CHANGELOG_ENTRY}
+
+## Download and Install
+
+- **Homebrew**: \`brew install ralph/spotifly/spotifly\`
+- **Manual**: Download Spotifly-latest.zip, extract, and move to Applications
+
+[Full Changelog](https://github.com/ralph/spotifly/blob/main/CHANGELOG.md) · [All Releases](https://github.com/ralph/spotifly/releases)" \
+    --repo ralph/spotifly
+gh release upload latest "Spotifly-latest.zip" --clobber --repo ralph/spotifly
+
+# homebrew-spotifly (temporary)
 gh release delete latest --yes --repo ralph/homebrew-spotifly 2>/dev/null || true
 gh release create latest \
     "${ZIP_NAME}" \
@@ -169,21 +216,17 @@ ${CHANGELOG_ENTRY}
 
 ## Download and Install
 
-- **Homebrew (recommended)**: \`brew install ralph/spotifly/spotifly\`
+- **Homebrew**: \`brew install ralph/spotifly/spotifly\`
 - **Manual**: Download Spotifly-latest.zip, extract, and move to Applications
 
-[Full Changelog](https://github.com/ralph/homebrew-spotifly/blob/main/CHANGELOG.md) · [All Releases](https://github.com/ralph/homebrew-spotifly/releases)" \
+[Full Changelog](https://github.com/ralph/spotifly/blob/main/CHANGELOG.md) · [All Releases](https://github.com/ralph/spotifly/releases)" \
     --repo ralph/homebrew-spotifly
-
-# Copy zip as latest.zip
-cp "${ZIP_NAME}" "Spotifly-latest.zip"
 gh release upload latest "Spotifly-latest.zip" --clobber --repo ralph/homebrew-spotifly
 
-echo -e "\n${GREEN}Release v${VERSION} created successfully!${NC}"
-echo -e "${GREEN}Latest release updated${NC}"
+echo -e "\n${GREEN}Releases created successfully on both repos!${NC}"
 echo ""
-echo -e "Download URL: https://github.com/ralph/homebrew-spotifly/releases/download/v${VERSION}/${ZIP_NAME}"
-echo -e "Latest URL: https://github.com/ralph/homebrew-spotifly/releases/download/latest/Spotifly-latest.zip"
+echo -e "Main repo: https://github.com/ralph/spotifly/releases/download/v${VERSION}/${ZIP_NAME}"
+echo -e "Homebrew tap: https://github.com/ralph/homebrew-spotifly/releases/download/v${VERSION}/${ZIP_NAME}"
 
 # Update Homebrew Cask formula
 echo -e "\n${YELLOW}Updating Homebrew Cask formula...${NC}"
