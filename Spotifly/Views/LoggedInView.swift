@@ -8,6 +8,8 @@
 import AppKit
 import SwiftUI
 
+// MARK: - LoggedInView
+
 struct LoggedInView: View {
     let authResult: SpotifyAuthResult
     let onLogout: () -> Void
@@ -63,6 +65,10 @@ struct LoggedInView: View {
     @State private var selectedArtistId: String?
     @State private var selectedPlaylistId: String?
 
+    // Sidebar width for dynamic now playing bar positioning
+    @State private var sidebarWidth: CGFloat = 0
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+
     // Determines if we need three-column layout
     private var needsThreeColumnLayout: Bool {
         switch selectedNavigationItem {
@@ -75,16 +81,17 @@ struct LoggedInView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
             if !windowState.isMiniPlayerMode {
                 mainLayoutView
             }
 
-            // Now Playing Bar (always visible at bottom)
+            // Now Playing Bar - floats over content, dynamically positioned to clear sidebar
             NowPlayingBarView(
                 playbackViewModel: playbackViewModel,
                 windowState: windowState,
             )
+            .padding(.leading, windowState.isMiniPlayerMode ? 0 : (columnVisibility == .detailOnly ? 0 : sidebarWidth + 8))
         }
         .background(windowState.isMiniPlayerMode ? Color(NSColor.windowBackgroundColor) : Color.clear)
         .searchShortcuts(searchFieldFocused: $searchFieldFocused)
@@ -182,7 +189,7 @@ struct LoggedInView: View {
 
     @ViewBuilder
     private var threeColumnLayout: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebarView()
         } content: {
             contentView()
@@ -198,7 +205,7 @@ struct LoggedInView: View {
 
     @ViewBuilder
     private var twoColumnLayout: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebarView()
         } detail: {
             contentView()
@@ -267,6 +274,19 @@ struct LoggedInView: View {
             },
             hasSearchResults: store.searchResults != nil,
         )
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .task(id: geometry.size.width) {
+                        #if DEBUG
+                            print("[SidebarWidth] Updating sidebarWidth to: \(geometry.size.width)")
+                        #endif
+                        await MainActor.run {
+                            sidebarWidth = geometry.size.width
+                        }
+                    }
+            }
+        }
     }
 
     @ViewBuilder

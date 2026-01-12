@@ -22,6 +22,7 @@ struct TrackContextMenu: View {
 
     @Binding var showNewPlaylistDialog: Bool
     var onPlaylistAdded: (() -> Void)?
+    var onNavigate: (() -> Void)?
 
     /// Favorite status from the store
     private var isFavorited: Bool {
@@ -81,6 +82,7 @@ struct TrackContextMenu: View {
 
         Button {
             if let artistId = track.artistId {
+                onNavigate?()
                 navigationCoordinator.navigateToArtistSection(
                     artistId: artistId,
                     from: currentSection,
@@ -94,6 +96,7 @@ struct TrackContextMenu: View {
 
         Button {
             if let albumId = track.albumId {
+                onNavigate?()
                 navigationCoordinator.navigateToAlbumSection(
                     albumId: albumId,
                     from: currentSection,
@@ -162,6 +165,7 @@ struct TrackContextMenu: View {
                         accessToken: token,
                     )
 
+                    onNavigate?()
                     navigationCoordinator.navigateToQueue()
                 } else {
                     playbackViewModel.errorMessage = "No radio tracks found"
@@ -219,6 +223,7 @@ extension TrackContextMenu {
         self.playbackViewModel = playbackViewModel
         _showNewPlaylistDialog = .constant(false)
         onPlaylistAdded = nil
+        onNavigate = nil
     }
 }
 

@@ -16,7 +16,7 @@ class WindowState: ObservableObject {
     // Store the previous window frame to restore when exiting mini player
     private var savedWindowFrame: NSRect?
 
-    static let miniPlayerSize = NSSize(width: 600, height: 120)
+    static let miniPlayerSize = NSSize(width: 600, height: 96)
     static let defaultSize = NSSize(width: 800, height: 600)
 
     func toggleMiniPlayerMode() {

@@ -11,16 +11,56 @@ struct NowPlayingBarView: View {
     @Environment(SpotifySession.self) private var session
     @Environment(AppStore.self) private var store
     @Environment(ConnectService.self) private var connectService
+    @Environment(NavigationCoordinator.self) private var navigationCoordinator
+    @Environment(TrackService.self) private var trackService
+    @Environment(PlaylistService.self) private var playlistService
     @Bindable var playbackViewModel: PlaybackViewModel
     @ObservedObject var windowState: WindowState
 
-    @State private var barHeight: CGFloat = 66
     @State private var cachedAlbumArtImage: Image?
     @State private var cachedAlbumArtURL: String?
+    @State private var showVolumePopover = false
+    @State private var isHoveringSeekBar = false
+    @State private var showNewPlaylistDialog = false
+    @State private var newPlaylistName = ""
+    @State private var showPlaylistAddedSuccess = false
 
-    /// Whether to show the bar (has queue OR Spotify Connect active)
-    private var shouldShowBar: Bool {
+    /// Whether something is currently playing or queued
+    private var hasPlayback: Bool {
         playbackViewModel.queueLength > 0 || store.isSpotifyConnectActive
+    }
+
+    /// Current track data for the context menu
+    private var currentTrackData: TrackRowData? {
+        guard let trackName = store.isSpotifyConnectActive ? store.currentTrackName : playbackViewModel.currentTrackName,
+              let trackUri = playbackViewModel.currentlyPlayingURI
+        else {
+            return nil
+        }
+
+        let artistName = (store.isSpotifyConnectActive ? store.currentArtistName : playbackViewModel.currentArtistName) ?? ""
+
+        // Try to get the full queue item for extra metadata (albumId, artistId, externalUrl)
+        let queueItem: QueueItem? = {
+            guard playbackViewModel.queueLength > 0 else { return nil }
+            guard let items = try? SpotifyPlayer.getAllQueueItems(),
+                  playbackViewModel.currentIndex < items.count
+            else { return nil }
+            return items[playbackViewModel.currentIndex]
+        }()
+
+        return TrackRowData(
+            id: playbackViewModel.currentTrackId ?? trackUri,
+            uri: trackUri,
+            name: trackName,
+            artistName: artistName,
+            albumArtURL: playbackViewModel.currentAlbumArtURL,
+            durationMs: Int(currentDurationMs),
+            trackNumber: nil,
+            albumId: queueItem?.albumId,
+            artistId: queueItem?.artistId,
+            externalUrl: queueItem?.externalUrl,
+        )
     }
 
     // Helper function for time formatting
@@ -31,142 +71,67 @@ struct NowPlayingBarView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
+    // Fixed dimensions for the now playing bar (in points)
+    private let barWidth: CGFloat = 700
+    private let barHeight: CGFloat = 60
+
     var body: some View {
-        if shouldShowBar {
-            VStack(spacing: 0) {
-                // Only show divider when not in mini player mode
-                if !windowState.isMiniPlayerMode {
-                    Divider()
+        playerLayout
+            .frame(width: windowState.isMiniPlayerMode ? nil : barWidth, height: windowState.isMiniPlayerMode ? nil : barHeight)
+            .frame(maxWidth: windowState.isMiniPlayerMode ? .infinity : nil, maxHeight: windowState.isMiniPlayerMode ? .infinity : nil)
+            .modifier(NowPlayingBarBackground(isMiniPlayerMode: windowState.isMiniPlayerMode))
+            .padding(windowState.isMiniPlayerMode ? 0 : 10)
+            .alert("playlist.new.title", isPresented: $showNewPlaylistDialog) {
+                TextField("playlist.new.placeholder", text: $newPlaylistName)
+                Button("action.cancel", role: .cancel) {
+                    newPlaylistName = ""
                 }
-
-                GeometryReader { geometry in
-                    let isCompact = geometry.size.width < 750
-                    let isVeryNarrow = geometry.size.width < 600
-                    let calculatedHeight: CGFloat = (isCompact && !windowState.isMiniPlayerMode) ? 90 : 66
-
-                    Group {
-                        if isCompact {
-                            // Compact layout: progress bar at bottom
-                            VStack(spacing: 8) {
-                                compactTopRow(showVolume: !isVeryNarrow)
-                                progressBar
-                                    .padding(.horizontal, 8)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-                            .padding(.bottom, windowState.isMiniPlayerMode ? 4 : 8)
-                        } else {
-                            // Wide layout: original layout
-                            wideLayout
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                        }
-                    }
-                    .onAppear {
-                        barHeight = calculatedHeight
-                    }
-                    .onChange(of: calculatedHeight) { _, newValue in
-                        barHeight = newValue
-                    }
+                Button("action.create") {
+                    createAndAddToPlaylist(name: newPlaylistName)
+                    newPlaylistName = ""
                 }
-                .background(windowState.isMiniPlayerMode ? Color(NSColor.windowBackgroundColor) : Color(NSColor.controlBackgroundColor))
-                .frame(height: windowState.isMiniPlayerMode ? nil : barHeight)
-                .frame(maxHeight: windowState.isMiniPlayerMode ? .infinity : nil)
+                .disabled(newPlaylistName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } message: {
+                Text("playlist.new.message")
             }
-            .task(id: playbackViewModel.currentTrackId) {
-                // Check favorite status when track changes
-                let token = await session.validAccessToken()
-                await playbackViewModel.checkCurrentTrackFavoriteStatus(accessToken: token)
-            }
-        }
     }
 
-    // MARK: - Compact Layout
+    // MARK: - Player Layout
 
-    private func compactTopRow(showVolume: Bool) -> some View {
-        HStack(spacing: 12) {
-            albumArt(size: 40)
-
-            trackInfo
-                .frame(minWidth: 100, alignment: .leading)
-
-            Spacer()
-
+    private var playerLayout: some View {
+        HStack(spacing: 24) {
+            // Left: Playback controls
             playbackControls
 
-            Spacer()
+            // Center: Track info with seek bar below
+            VStack(spacing: 4) {
+                // Top row: Cover | Title & Artist | Menu
+                HStack(spacing: 10) {
+                    albumArt(size: 34)
 
-            favoriteButton
+                    trackInfo
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-            queuePosition
+                    trackMenu
+                }
 
-            miniPlayerToggle
+                // Bottom row: Seek bar spanning full width
+                progressBar
+            }
+            .frame(maxWidth: 350)
 
-            if showVolume {
+            // Right: Other controls
+            HStack(spacing: 16) {
+                favoriteButton
+
+                queuePosition
+
+                miniPlayerToggle
+
                 volumeControl
             }
         }
-    }
-
-    // MARK: - Wide Layout
-
-    private var wideLayout: some View {
-        HStack(spacing: 16) {
-            albumArt(size: 50)
-
-            trackInfo
-                .frame(minWidth: 150, alignment: .leading)
-
-            Spacer()
-
-            playbackControls
-
-            Spacer()
-
-            // TimelineView updates at display refresh rate for smooth slider
-            TimelineView(.animation(minimumInterval: 0.033)) { _ in
-                HStack(spacing: 8) {
-                    Text(formatTime(currentPositionMs))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .frame(width: 40, alignment: .trailing)
-
-                    Slider(
-                        value: Binding(
-                            get: { Double(currentPositionMs) },
-                            set: { newValue in
-                                if store.isSpotifyConnectActive {
-                                    Task {
-                                        let token = await session.validAccessToken()
-                                        await connectService.seek(to: Int(newValue), accessToken: token)
-                                    }
-                                } else {
-                                    playbackViewModel.seek(to: UInt32(newValue))
-                                }
-                            },
-                        ),
-                        in: 0 ... Double(max(currentDurationMs, 1)),
-                    )
-                    .tint(.green)
-                    .frame(width: 200)
-
-                    Text(formatTime(currentDurationMs))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .frame(width: 40, alignment: .leading)
-                }
-            }
-
-            favoriteButton
-
-            queuePosition
-
-            miniPlayerToggle
-
-            volumeControl
-        }
+        .padding(.horizontal, 20)
     }
 
     // MARK: - Shared Components
@@ -349,10 +314,14 @@ struct NowPlayingBarView: View {
         // TimelineView updates at display refresh rate for smooth slider
         TimelineView(.animation(minimumInterval: 0.033)) { _ in
             HStack(spacing: 8) {
-                Text(formatTime(currentPositionMs))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                // Show timestamp only on hover
+                if isHoveringSeekBar {
+                    Text(formatTime(currentPositionMs))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
 
                 Slider(
                     value: Binding(
@@ -370,33 +339,66 @@ struct NowPlayingBarView: View {
                     ),
                     in: 0 ... Double(max(currentDurationMs, 1)),
                 )
+                .controlSize(.mini)
                 .tint(.green)
 
-                Text(formatTime(currentDurationMs))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                // Show timestamp only on hover
+                if isHoveringSeekBar {
+                    Text(formatTime(currentDurationMs))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+            }
+            .frame(height: 12) // Fixed height prevents layout shift on hover
+            .animation(.easeInOut(duration: 0.15), value: isHoveringSeekBar)
+            .onHover { hovering in
+                isHoveringSeekBar = hovering
             }
         }
     }
 
     private var queuePosition: some View {
-        Text("\(playbackViewModel.currentIndex + 1)/\(playbackViewModel.queueLength)")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(width: 50, alignment: .trailing)
+        Button {
+            exitMiniPlayerIfNeeded()
+            navigationCoordinator.navigateToQueue()
+        } label: {
+            Text("\(playbackViewModel.currentIndex + 1)/\(playbackViewModel.queueLength)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .trailing)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Current track ID for favorite operations (extracted from URI if needed)
+    private var currentTrackIdForFavorite: String? {
+        guard let trackId = playbackViewModel.currentTrackId else { return nil }
+        // Handle URI format: spotify:track:TRACK_ID
+        if trackId.hasPrefix("spotify:track:") {
+            return String(trackId.dropFirst("spotify:track:".count))
+        }
+        return trackId
+    }
+
+    /// Whether the current track is favorited (from global store)
+    private var isCurrentTrackFavorited: Bool {
+        guard let trackId = currentTrackIdForFavorite else { return false }
+        return store.isFavorite(trackId)
     }
 
     private var favoriteButton: some View {
         Button {
             Task {
+                guard let trackId = currentTrackIdForFavorite else { return }
                 let token = await session.validAccessToken()
-                await playbackViewModel.toggleCurrentTrackFavorite(accessToken: token)
+                try? await trackService.toggleFavorite(trackId: trackId, accessToken: token)
             }
         } label: {
-            Image(systemName: playbackViewModel.isCurrentTrackFavorited ? "heart.fill" : "heart")
+            Image(systemName: isCurrentTrackFavorited ? "heart.fill" : "heart")
                 .font(.body)
-                .foregroundStyle(playbackViewModel.isCurrentTrackFavorited ? .red : .secondary)
+                .foregroundStyle(isCurrentTrackFavorited ? .red : .secondary)
         }
         .buttonStyle(.plain)
     }
@@ -427,20 +429,35 @@ struct NowPlayingBarView: View {
     }
 
     private var volumeControl: some View {
-        HStack(spacing: 6) {
+        Button {
+            showVolumePopover.toggle()
+        } label: {
             Image(systemName: currentVolume == 0 ? "speaker.fill" : currentVolume < 50 ? "speaker.wave.1.fill" : "speaker.wave.3.fill")
-                .font(.caption)
+                .font(.body)
                 .foregroundStyle(store.isSpotifyConnectActive ? .green : .secondary)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showVolumePopover, arrowEdge: .bottom) {
+            HStack(spacing: 8) {
+                Image(systemName: "speaker.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            Slider(
-                value: Binding(
-                    get: { currentVolume },
-                    set: { setVolume($0) },
-                ),
-                in: 0 ... 100,
-            )
-            .tint(.green)
-            .frame(width: 80)
+                Slider(
+                    value: Binding(
+                        get: { currentVolume },
+                        set: { setVolume($0) },
+                    ),
+                    in: 0 ... 100,
+                )
+                .tint(.green)
+                .frame(width: 120)
+
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
         }
     }
 
@@ -456,5 +473,94 @@ struct NowPlayingBarView: View {
         }
         .buttonStyle(.plain)
         .help(windowState.isMiniPlayerMode ? "mini_player.restore" : "mini_player.enter")
+    }
+
+    @ViewBuilder
+    private var trackMenu: some View {
+        if let track = currentTrackData {
+            Menu {
+                TrackContextMenu(
+                    track: track,
+                    currentSection: .queue,
+                    selectionId: nil,
+                    playbackViewModel: playbackViewModel,
+                    showNewPlaylistDialog: $showNewPlaylistDialog,
+                    onPlaylistAdded: showSuccessFeedback,
+                    onNavigate: exitMiniPlayerIfNeeded,
+                )
+            } label: {
+                Image(systemName: showPlaylistAddedSuccess ? "checkmark.circle.fill" : "ellipsis")
+                    .font(.body)
+                    .foregroundColor(showPlaylistAddedSuccess ? .green : .secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+                    .animation(.easeInOut(duration: 0.2), value: showPlaylistAddedSuccess)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(showPlaylistAddedSuccess)
+        }
+    }
+
+    private func exitMiniPlayerIfNeeded() {
+        if windowState.isMiniPlayerMode {
+            windowState.toggleMiniPlayerMode()
+        }
+    }
+
+    private func showSuccessFeedback() {
+        showPlaylistAddedSuccess = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            showPlaylistAddedSuccess = false
+        }
+    }
+
+    private func createAndAddToPlaylist(name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmedName.isEmpty, let track = currentTrackData else { return }
+
+        Task {
+            do {
+                let token = await session.validAccessToken()
+
+                // Create the playlist using PlaylistService
+                let newPlaylist = try await playlistService.createPlaylist(
+                    userId: session.userId ?? "",
+                    name: trimmedName,
+                    accessToken: token,
+                )
+
+                // Add the track to the new playlist
+                try await playlistService.addTracksToPlaylist(
+                    playlistId: newPlaylist.id,
+                    trackIds: [track.trackId],
+                    accessToken: token,
+                )
+
+                showSuccessFeedback()
+            } catch {
+                playbackViewModel.errorMessage = "Failed to create playlist: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+// MARK: - Glass Effect Background
+
+/// Applies either a solid background (mini player) or liquid glass effect (expanded mode)
+private struct NowPlayingBarBackground: ViewModifier {
+    let isMiniPlayerMode: Bool
+
+    func body(content: Content) -> some View {
+        if isMiniPlayerMode {
+            content
+                .background(Color(NSColor.windowBackgroundColor))
+        } else {
+            content
+                .glassEffect(.regular, in: .capsule)
+                .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
+        }
     }
 }
