@@ -12,7 +12,7 @@ import Foundation
 
 /// Unified track entity - single source of truth for all track data.
 /// Constructed from APITrack or TrackMetadata via EntityConversions.
-struct Track: Identifiable, Sendable, Hashable {
+struct Track: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     let name: String
     let uri: String
@@ -30,17 +30,14 @@ struct Track: Identifiable, Sendable, Hashable {
     let imageURL: URL?
 
     var durationFormatted: String {
-        let totalSeconds = durationMs / 1000
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
+        formatTrackTime(milliseconds: durationMs)
     }
 }
 
 // MARK: - Album
 
 /// Unified album entity.
-struct Album: Identifiable, Sendable, Hashable {
+struct Album: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     let name: String
     let uri: String
@@ -106,7 +103,7 @@ struct Album: Identifiable, Sendable, Hashable {
 // MARK: - Artist
 
 /// Unified artist entity.
-struct Artist: Identifiable, Sendable, Hashable {
+struct Artist: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     let name: String
     let uri: String
@@ -118,7 +115,7 @@ struct Artist: Identifiable, Sendable, Hashable {
 // MARK: - Playlist
 
 /// Unified playlist entity.
-struct Playlist: Identifiable, Sendable, Hashable {
+struct Playlist: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     var name: String // Mutable - can be edited
     var description: String?
@@ -179,7 +176,7 @@ struct Playlist: Identifiable, Sendable, Hashable {
 // MARK: - Device
 
 /// Spotify Connect device.
-struct Device: Identifiable, Sendable, Hashable {
+struct Device: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     let name: String
     let type: String
@@ -189,7 +186,61 @@ struct Device: Identifiable, Sendable, Hashable {
     let volumePercent: Int?
 }
 
+// MARK: - Queue Models
+
+/// Indicates the source of a track in the queue
+enum TrackProvider: String, Codable, Sendable {
+    case queue // Manually added to queue
+    case context // From current album/playlist/artist
+    case autoplay // Autoplay suggestion
+}
+
+/// A track in the queue with provider information
+struct QueueTrack: Identifiable, Sendable {
+    let id: String // Unique ID for list diffing (track.id + index or UUID)
+    let track: Track
+    let provider: TrackProvider
+
+    /// Create from a Track with provider info
+    init(id: String = UUID().uuidString, track: Track, provider: TrackProvider) {
+        self.id = id
+        self.track = track
+        self.provider = provider
+    }
+}
+
+/// Represents the current playback queue state
+struct PlaybackQueue: Sendable {
+    var currentTrack: QueueTrack?
+    var manualQueue: [QueueTrack] // Manually queued tracks (provider: .queue)
+    var contextTracks: [QueueTrack] // Tracks from current context (provider: .context)
+
+    /// All upcoming tracks - manual queue plays first, then context
+    var allUpcoming: [QueueTrack] {
+        manualQueue + contextTracks
+    }
+
+    /// Total count of upcoming tracks
+    var upcomingCount: Int {
+        manualQueue.count + contextTracks.count
+    }
+
+    init(currentTrack: QueueTrack? = nil, manualQueue: [QueueTrack] = [], contextTracks: [QueueTrack] = []) {
+        self.currentTrack = currentTrack
+        self.manualQueue = manualQueue
+        self.contextTracks = contextTracks
+    }
+}
+
 // MARK: - Duration Formatting
+
+/// Format milliseconds as track time (e.g., "3:45")
+nonisolated func formatTrackTime(milliseconds: Int) -> String {
+    let totalSeconds = milliseconds / 1000
+    let minutes = totalSeconds / 60
+    let seconds = totalSeconds % 60
+    return String(format: "%d:%02d", minutes, seconds)
+}
 
 /// Format milliseconds as human-readable duration (e.g., "3 hr 15 min" or "45 min")
 func formatDuration(milliseconds: Int) -> String {
@@ -213,7 +264,7 @@ func totalDuration(of tracks: some Sequence<Track>) -> String {
 // MARK: - Pagination State
 
 /// Tracks pagination state for a collection.
-struct PaginationState: Sendable {
+struct PaginationState: Sendable, Encodable {
     var isLoaded = false
     var isLoading = false
     var hasMore = true

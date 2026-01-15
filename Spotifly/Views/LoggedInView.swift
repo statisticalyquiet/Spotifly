@@ -22,38 +22,38 @@ struct LoggedInView: View {
     // Normalized state store
     @State private var store: AppStore
 
-    // Services that need Task deduplication (must persist across view recreations)
+    // Services that need Task deduplication or subscription persistence
     @State private var playlistService: PlaylistService
     @State private var albumService: AlbumService
     @State private var artistService: ArtistService
+    @State private var queueService: QueueService
 
     // Services - stateless, created on demand (all state lives in AppStore)
     private var trackService: TrackService { TrackService(store: store) }
     private var deviceService: DeviceService { DeviceService(store: store) }
-    private var queueService: QueueService { QueueService(store: store) }
     private var recentlyPlayedService: RecentlyPlayedService { RecentlyPlayedService(store: store) }
     private var searchService: SearchService { SearchService(store: store) }
     private var topItemsService: TopItemsService { TopItemsService(store: store) }
     private var newReleasesService: NewReleasesService { NewReleasesService(store: store) }
-    private var connectService: ConnectService { ConnectService(store: store, deviceService: deviceService, queueService: queueService) }
 
     @State private var navigationCoordinator = NavigationCoordinator()
-
-    // Speaker settings
-    @AppStorage("showSpotifyConnectSpeakers") private var showConnectSpeakers: Bool = false
 
     init(authResult: SpotifyAuthResult, onLogout: @escaping () -> Void) {
         self.authResult = authResult
         self.onLogout = onLogout
 
         let store = AppStore()
+        let session = SpotifySession(authResult: authResult)
         _store = State(initialValue: store)
-        _session = State(initialValue: SpotifySession(authResult: authResult))
+        _session = State(initialValue: session)
 
-        // Initialize services that need Task deduplication
+        // Initialize services that need Task deduplication or subscription persistence
         _playlistService = State(initialValue: PlaylistService(store: store))
         _albumService = State(initialValue: AlbumService(store: store))
         _artistService = State(initialValue: ArtistService(store: store))
+        _queueService = State(initialValue: QueueService(store: store, tokenProvider: {
+            await session.validAccessToken()
+        }))
     }
 
     @State private var selectedNavigationItem: NavigationItem? = .startpage
@@ -104,7 +104,6 @@ struct LoggedInView: View {
         .environment(newReleasesService)
         .environment(navigationCoordinator)
         .environment(store)
-        .environment(connectService)
         .environment(trackService)
         .environment(playlistService)
         .environment(albumService)
@@ -114,6 +113,12 @@ struct LoggedInView: View {
         .focusedValue(\.session, session)
         .focusedValue(\.recentlyPlayedService, recentlyPlayedService)
         .task {
+            #if DEBUG
+                // Set debug references to actual @State stored instances
+                AppStore.current = store
+                SpotifySession.current = session
+            #endif
+
             // Load startup data
             let token = await session.validAccessToken()
 
@@ -127,14 +132,11 @@ struct LoggedInView: View {
 
             _ = await (favorites, topArtists, newReleases, recentlyPlayed)
 
-            // Only initialize player/Spirc and sync Connect if the setting is enabled
-            if showConnectSpeakers {
-                // Initialize player early so Spotifly appears as a Connect device immediately
-                await playbackViewModel.initializeIfNeeded(accessToken: token)
+            // Set token provider for queue fetching on track changes
+            SpotifyPlayer.setTokenProvider { await session.validAccessToken() }
 
-                // Check if there's already active remote playback to sync with
-                await connectService.checkAndSyncRemotePlayback(accessToken: token)
-            }
+            // Initialize player/Spirc so Spotifly appears as a Connect device
+            await playbackViewModel.initializeIfNeeded(accessToken: token)
         }
         .onChange(of: navigationCoordinator.pendingNavigationItem) { _, newValue in
             if let pendingItem = newValue {

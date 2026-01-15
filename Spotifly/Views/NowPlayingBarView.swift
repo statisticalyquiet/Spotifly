@@ -10,7 +10,6 @@ import SwiftUI
 struct NowPlayingBarView: View {
     @Environment(SpotifySession.self) private var session
     @Environment(AppStore.self) private var store
-    @Environment(ConnectService.self) private var connectService
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
     @Environment(TrackService.self) private var trackService
     @Environment(PlaylistService.self) private var playlistService
@@ -27,48 +26,41 @@ struct NowPlayingBarView: View {
 
     /// Whether something is currently playing or queued
     private var hasPlayback: Bool {
-        playbackViewModel.queueLength > 0 || store.isSpotifyConnectActive
+        playbackViewModel.currentTrackUri != nil
+    }
+
+    /// Extract track ID from URI (spotify:track:XXXX -> XXXX)
+    private var currentTrackId: String? {
+        guard let uri = playbackViewModel.currentTrackUri else { return nil }
+        return SpotifyAPI.parseTrackURI(uri)
+    }
+
+    /// Current track from global store (populated by QueueService)
+    private var currentTrack: Track? {
+        guard let trackId = currentTrackId else { return nil }
+        return store.tracks[trackId]
     }
 
     /// Current track data for the context menu
     private var currentTrackData: TrackRowData? {
-        guard let trackName = store.isSpotifyConnectActive ? store.currentTrackName : playbackViewModel.currentTrackName,
-              let trackUri = playbackViewModel.currentlyPlayingURI
+        guard let track = currentTrack,
+              let uri = playbackViewModel.currentTrackUri
         else {
             return nil
         }
 
-        let artistName = (store.isSpotifyConnectActive ? store.currentArtistName : playbackViewModel.currentArtistName) ?? ""
-
-        // Try to get the full queue item for extra metadata (albumId, artistId, externalUrl)
-        let queueItem: QueueItem? = {
-            guard playbackViewModel.queueLength > 0 else { return nil }
-            guard let items = try? SpotifyPlayer.getAllQueueItems(),
-                  playbackViewModel.currentIndex < items.count
-            else { return nil }
-            return items[playbackViewModel.currentIndex]
-        }()
-
         return TrackRowData(
-            id: playbackViewModel.currentTrackId ?? trackUri,
-            uri: trackUri,
-            name: trackName,
-            artistName: artistName,
-            albumArtURL: playbackViewModel.currentAlbumArtURL,
-            durationMs: Int(currentDurationMs),
-            trackNumber: nil,
-            albumId: queueItem?.albumId,
-            artistId: queueItem?.artistId,
-            externalUrl: queueItem?.externalUrl,
+            id: track.id,
+            uri: uri,
+            name: track.name,
+            artistName: track.artistName,
+            albumArtURL: track.imageURL?.absoluteString,
+            durationMs: track.durationMs,
+            trackNumber: track.trackNumber,
+            albumId: track.albumId,
+            artistId: track.artistId,
+            externalUrl: track.externalUrl,
         )
-    }
-
-    // Helper function for time formatting
-    private func formatTime(_ milliseconds: UInt32) -> String {
-        let totalSeconds = Int(milliseconds / 1000)
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
     }
 
     // Fixed dimensions for the now playing bar (in points)
@@ -80,7 +72,8 @@ struct NowPlayingBarView: View {
             .frame(width: windowState.isMiniPlayerMode ? nil : barWidth, height: windowState.isMiniPlayerMode ? nil : barHeight)
             .frame(maxWidth: windowState.isMiniPlayerMode ? .infinity : nil, maxHeight: windowState.isMiniPlayerMode ? .infinity : nil)
             .modifier(NowPlayingBarBackground(isMiniPlayerMode: windowState.isMiniPlayerMode))
-            .padding(windowState.isMiniPlayerMode ? 0 : 10)
+            .padding([.leading, .trailing], windowState.isMiniPlayerMode ? 0 : 40)
+            .padding([.bottom], windowState.isMiniPlayerMode ? 0 : 20)
             .alert("playlist.new.title", isPresented: $showNewPlaylistDialog) {
                 TextField("playlist.new.placeholder", text: $newPlaylistName)
                 Button("action.cancel", role: .cancel) {
@@ -138,39 +131,37 @@ struct NowPlayingBarView: View {
 
     private func albumArt(size: CGFloat) -> some View {
         Group {
-            if let cachedImage = cachedAlbumArtImage,
-               cachedAlbumArtURL == playbackViewModel.currentAlbumArtURL
-            {
-                // Use cached image
-                cachedImage
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            } else if let artURL = playbackViewModel.currentAlbumArtURL,
-                      !artURL.isEmpty,
-                      let url = URL(string: artURL)
-            {
-                // Load new image
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        ProgressView()
-                            .frame(width: size, height: size)
-                    case let .success(image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: size, height: size)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            .onAppear {
-                                cachedAlbumArtImage = image
-                                cachedAlbumArtURL = artURL
-                            }
-                    case .failure:
-                        placeholderAlbumArt(size: size)
-                    @unknown default:
-                        EmptyView()
+            if let url = currentTrack?.imageURL {
+                let urlString = url.absoluteString
+                if let cachedImage = cachedAlbumArtImage, cachedAlbumArtURL == urlString {
+                    // Use cached image
+                    cachedImage
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: size, height: size)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    // Load new image
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                                .frame(width: size, height: size)
+                        case let .success(image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: size, height: size)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                .onAppear {
+                                    cachedAlbumArtImage = image
+                                    cachedAlbumArtURL = urlString
+                                }
+                        case .failure:
+                            placeholderAlbumArt(size: size)
+                        @unknown default:
+                            EmptyView()
+                        }
                     }
                 }
             } else {
@@ -189,125 +180,64 @@ struct NowPlayingBarView: View {
 
     private var trackInfo: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if let trackName = store.isSpotifyConnectActive ? store.currentTrackName : playbackViewModel.currentTrackName {
-                Text(trackName)
+            if let track = currentTrack {
+                Text(track.name)
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .lineLimit(1)
-            }
-            if let artistName = store.isSpotifyConnectActive ? store.currentArtistName : playbackViewModel.currentArtistName {
-                Text(artistName)
+                Text(track.artistName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            // Show device indicator when Connect active - clickable to transfer back
-            if store.isSpotifyConnectActive, let deviceName = store.spotifyConnectDeviceName {
-                Button {
-                    transferToLocalPlayback()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "hifispeaker.fill")
-                            .font(.caption2)
-                        Text(deviceName)
-                            .font(.caption2)
-                        Image(systemName: "arrow.right.circle")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.green)
-                }
-                .buttonStyle(.plain)
-                .help("connect.transfer_to_computer")
-            }
-        }
-    }
-
-    private func transferToLocalPlayback() {
-        Task {
-            let token = await session.validAccessToken()
-            await connectService.transferToLocal(playbackViewModel: playbackViewModel, accessToken: token)
         }
     }
 
     private var playbackControls: some View {
         HStack(spacing: 16) {
             Button {
-                if store.isSpotifyConnectActive {
-                    Task {
-                        let token = await session.validAccessToken()
-                        await connectService.skipToPrevious(accessToken: token)
-                    }
-                } else {
-                    playbackViewModel.previous()
-                }
+                playbackViewModel.previous()
             } label: {
                 Image(systemName: "backward.fill")
                     .font(.body)
             }
             .buttonStyle(.plain)
-            .disabled(!store.isSpotifyConnectActive && !playbackViewModel.hasPrevious)
+            .disabled(!playbackViewModel.hasPrevious)
 
             Button {
-                if store.isSpotifyConnectActive {
-                    Task {
-                        let token = await session.validAccessToken()
-                        if store.isPlaying {
-                            await connectService.pause(accessToken: token)
-                        } else {
-                            await connectService.resume(accessToken: token)
-                        }
-                    }
+                if playbackViewModel.isPlaying {
+                    playbackViewModel.pause()
                 } else {
-                    if playbackViewModel.isPlaying {
-                        SpotifyPlayer.pause()
-                        playbackViewModel.isPlaying = false
-                    } else {
-                        SpotifyPlayer.resume()
-                        playbackViewModel.isPlaying = true
-                    }
-                    playbackViewModel.updateNowPlayingInfo()
+                    playbackViewModel.resume()
                 }
             } label: {
-                let isPlaying = store.isSpotifyConnectActive ? store.isPlaying : playbackViewModel.isPlaying
-                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                Image(systemName: playbackViewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.title2)
             }
             .buttonStyle(.plain)
 
             Button {
-                if store.isSpotifyConnectActive {
-                    Task {
-                        let token = await session.validAccessToken()
-                        await connectService.skipToNext(accessToken: token)
-                    }
-                } else {
-                    playbackViewModel.next()
-                }
+                playbackViewModel.next()
             } label: {
                 Image(systemName: "forward.fill")
                     .font(.body)
             }
             .buttonStyle(.plain)
-            .disabled(!store.isSpotifyConnectActive && !playbackViewModel.hasNext)
+            .disabled(!playbackViewModel.hasNext)
         }
     }
 
     /// Current playback position (interpolated for smooth display)
     private var currentPositionMs: UInt32 {
-        if store.isSpotifyConnectActive {
-            store.interpolatedPositionMs
-        } else {
-            playbackViewModel.interpolatedPositionMs
-        }
+        playbackViewModel.interpolatedPositionMs
     }
 
-    /// Current track duration
+    /// Current track duration (from store, fallback to playback state)
     private var currentDurationMs: UInt32 {
-        if store.isSpotifyConnectActive {
-            store.trackDurationMs
-        } else {
-            playbackViewModel.trackDurationMs
+        if let track = currentTrack {
+            return UInt32(track.durationMs)
         }
+        return playbackViewModel.trackDurationMs
     }
 
     private var progressBar: some View {
@@ -316,7 +246,7 @@ struct NowPlayingBarView: View {
             HStack(spacing: 8) {
                 // Show timestamp only on hover
                 if isHoveringSeekBar {
-                    Text(formatTime(currentPositionMs))
+                    Text(formatTrackTime(milliseconds: Int(currentPositionMs)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -327,14 +257,7 @@ struct NowPlayingBarView: View {
                     value: Binding(
                         get: { Double(currentPositionMs) },
                         set: { newValue in
-                            if store.isSpotifyConnectActive {
-                                Task {
-                                    let token = await session.validAccessToken()
-                                    await connectService.seek(to: Int(newValue), accessToken: token)
-                                }
-                            } else {
-                                playbackViewModel.seek(to: UInt32(newValue))
-                            }
+                            playbackViewModel.seek(to: UInt32(newValue))
                         },
                     ),
                     in: 0 ... Double(max(currentDurationMs, 1)),
@@ -344,7 +267,7 @@ struct NowPlayingBarView: View {
 
                 // Show timestamp only on hover
                 if isHoveringSeekBar {
-                    Text(formatTime(currentDurationMs))
+                    Text(formatTrackTime(milliseconds: Int(currentDurationMs)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -364,7 +287,7 @@ struct NowPlayingBarView: View {
             exitMiniPlayerIfNeeded()
             navigationCoordinator.navigateToQueue()
         } label: {
-            Text("\(playbackViewModel.currentIndex + 1)/\(playbackViewModel.queueLength)")
+            Text("\(store.currentIndex + 1)/\(store.queueLength)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 50, alignment: .trailing)
@@ -372,26 +295,16 @@ struct NowPlayingBarView: View {
         .buttonStyle(.plain)
     }
 
-    /// Current track ID for favorite operations (extracted from URI if needed)
-    private var currentTrackIdForFavorite: String? {
-        guard let trackId = playbackViewModel.currentTrackId else { return nil }
-        // Handle URI format: spotify:track:TRACK_ID
-        if trackId.hasPrefix("spotify:track:") {
-            return String(trackId.dropFirst("spotify:track:".count))
-        }
-        return trackId
-    }
-
     /// Whether the current track is favorited (from global store)
     private var isCurrentTrackFavorited: Bool {
-        guard let trackId = currentTrackIdForFavorite else { return false }
+        guard let trackId = currentTrackId else { return false }
         return store.isFavorite(trackId)
     }
 
     private var favoriteButton: some View {
         Button {
             Task {
-                guard let trackId = currentTrackIdForFavorite else { return }
+                guard let trackId = currentTrackId else { return }
                 let token = await session.validAccessToken()
                 try? await trackService.toggleFavorite(trackId: trackId, accessToken: token)
             }
@@ -403,29 +316,13 @@ struct NowPlayingBarView: View {
         .buttonStyle(.plain)
     }
 
-    /// Unified volume (0-100 scale, like Spotify API)
+    /// Unified volume (0-100 scale)
     private var currentVolume: Double {
-        let vol = if store.isSpotifyConnectActive {
-            store.spotifyConnectVolume
-        } else {
-            playbackViewModel.volume * 100
-        }
-        #if DEBUG
-            // Uncomment to debug volume issues
-            // print("[NowPlayingBar] currentVolume: \(vol), isConnect=\(store.isSpotifyConnectActive), connectVol=\(store.spotifyConnectVolume), localVol=\(playbackViewModel.volume)")
-        #endif
-        return vol
+        playbackViewModel.volume * 100
     }
 
     private func setVolume(_ volume: Double) {
-        if store.isSpotifyConnectActive {
-            Task {
-                let token = await session.validAccessToken()
-                connectService.setVolume(volume, accessToken: token)
-            }
-        } else {
-            playbackViewModel.volume = volume / 100
-        }
+        playbackViewModel.volume = volume / 100
     }
 
     private var volumeControl: some View {
@@ -434,7 +331,7 @@ struct NowPlayingBarView: View {
         } label: {
             Image(systemName: currentVolume == 0 ? "speaker.fill" : currentVolume < 50 ? "speaker.wave.1.fill" : "speaker.wave.3.fill")
                 .font(.body)
-                .foregroundStyle(store.isSpotifyConnectActive ? .green : .secondary)
+                .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
         .popover(isPresented: $showVolumePopover, arrowEdge: .bottom) {

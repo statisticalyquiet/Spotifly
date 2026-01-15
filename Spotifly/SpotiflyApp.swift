@@ -48,10 +48,20 @@ extension FocusedValues {
     }
 }
 
+// MARK: - App Delegate
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_: Notification) {
+        // Shut down Spirc to send goodbye to other Spotify Connect devices
+        SpotifyPlayer.shutdown()
+    }
+}
+
 // MARK: - App
 
 @main
 struct SpotiflyApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var windowState = WindowState()
 
     init() {
@@ -93,13 +103,10 @@ struct SpotiflyCommands: Commands {
         CommandMenu("menu.playback") {
             Button("menu.play_pause") {
                 if playbackViewModel.isPlaying {
-                    SpotifyPlayer.pause()
-                    playbackViewModel.isPlaying = false
+                    playbackViewModel.pause()
                 } else {
-                    SpotifyPlayer.resume()
-                    playbackViewModel.isPlaying = true
+                    playbackViewModel.resume()
                 }
-                playbackViewModel.updateNowPlayingInfo()
             }
             .keyboardShortcut(" ", modifiers: [])
 
@@ -163,5 +170,21 @@ struct SpotiflyCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: .command)
         }
+
+        #if DEBUG
+            CommandMenu("Debug") {
+                Button("Dump Store to Clipboard") {
+                    AppStore.current?.debugDumpJSON()
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+
+                Button("Copy OAuth Token") {
+                    if let token = SpotifySession.current?.accessToken {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(token, forType: .string)
+                    }
+                }
+            }
+        #endif
     }
 }

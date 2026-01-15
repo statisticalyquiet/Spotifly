@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Transfer to local playback now uses librespot's native `Spirc.transfer()` method instead of Web API workaround
+- Transfer to remote devices now uses librespot's native `SpClient.transfer()` method instead of Web API workaround
+- Both transfer directions now preserve full playback context (album/playlist, shuffle, repeat modes) seamlessly
+- Seeking now uses `Spirc.set_position_ms()` to properly sync position with Spotify Connect state
+- Volume changes now use `Spirc.set_volume()` to properly sync volume with Spotify Connect state
+- Next/previous track now use `Spirc.next()`/`Spirc.prev()` to properly sync with Spotify Connect state
+- Pause/resume now use `Spirc.pause()`/`Spirc.play()` to properly sync with Spotify Connect state
+- App now calls `Spirc.shutdown()` on quit to properly disconnect from Spotify Connect and notify other devices
+- Playing albums/playlists/artists now uses `Spirc.load()` with context URI for proper Connect state sync
+- Playing track lists now uses `Spirc.load()` with track URIs for proper Connect state sync
+- Add to queue now uses Spotify Web API (POST /me/player/queue) which syncs to Spirc via dealer
+
+### Added
+- Shuffle support via `Spirc.shuffle()` - shuffle/unshuffle playback with Connect state sync
+- Repeat context support via `Spirc.repeat()` - repeat album/playlist with Connect state sync
+- Repeat track support via `Spirc.repeat_track()` - repeat single track with Connect state sync
+- Web API method `SpotifyAPI.addToQueue()` for adding tracks to queue with Connect sync
+
+### Removed
+- Obsolete 500ms seek delay hack for transfer to local - native transfer preserves position seamlessly
+- Obsolete Web API transfer functions (`SpotifyAPI.transferPlayback()`, `SpotifyAPI.startPlayback()`) - replaced by native librespot calls
+- Local queue management (`QUEUE`, `CURRENT_INDEX`) - queue is now fully managed by Spirc's ConnectState
+- Fallback code for playback controls - all controls now require Spirc (no standalone player mode)
+- Rust FFI queue functions deprecated - use Spotify Web API instead (GET/POST /me/player/queue)
+
 ## [1.2.0] - 2026-01-12
 
 ### Added

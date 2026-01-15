@@ -19,29 +19,10 @@ struct StartpageView: View {
     @AppStorage("showTopArtists") private var showTopArtists: Bool = true
     @AppStorage("showRecentlyPlayed") private var showRecentlyPlayed: Bool = true
     @AppStorage("showNewReleases") private var showNewReleases: Bool = true
-    @AppStorage("startpageSectionOrder") private var sectionOrderData: Data = .init()
-
-    @State private var versionTapCount = 0
-    @State private var showTokenInfo = false
 
     /// Whether any section is enabled
     private var hasAnySectionEnabled: Bool {
         showTopArtists || showRecentlyPlayed || showNewReleases
-    }
-
-    /// Ordered list of sections from preferences
-    private var orderedSections: [StartpageSection] {
-        guard !sectionOrderData.isEmpty,
-              let order = try? JSONDecoder().decode([StartpageSection].self, from: sectionOrderData)
-        else {
-            return StartpageSection.defaultOrder
-        }
-        // Ensure all sections are present
-        var sections = order.filter { StartpageSection.allCases.contains($0) }
-        for section in StartpageSection.allCases where !sections.contains(section) {
-            sections.append(section)
-        }
-        return sections
     }
 
     /// Check if a section is enabled
@@ -57,7 +38,7 @@ struct StartpageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if hasAnySectionEnabled {
-                    ForEach(orderedSections) { section in
+                    ForEach(StartpageSection.allCases) { section in
                         if isSectionEnabled(section) {
                             sectionView(for: section)
                         }
@@ -66,9 +47,6 @@ struct StartpageView: View {
                     // Empty state when no sections are enabled
                     emptyStateView
                 }
-
-                // Version Section
-                versionSection
             }
             .padding(.vertical)
         }
@@ -195,11 +173,6 @@ struct StartpageView: View {
 
     // MARK: - Recently Played Section
 
-    /// Filter recent items to only albums and playlists
-    private var recentAlbumsAndPlaylists: [RecentItem] {
-        store.recentItems.filter { !$0.isArtist }
-    }
-
     @ViewBuilder
     private var recentlyPlayedSection: some View {
         if store.recentlyPlayedIsLoading {
@@ -213,87 +186,16 @@ struct StartpageView: View {
             Text(String(format: String(localized: "error.load_recently_played"), error))
                 .foregroundStyle(.red)
                 .padding()
-        } else if !recentAlbumsAndPlaylists.isEmpty {
-            RecentContentSection(items: recentAlbumsAndPlaylists)
+        } else if !store.recentAlbumsAndPlaylists.isEmpty {
+            RecentContentSection(items: store.recentAlbumsAndPlaylists)
         }
-    }
-
-    // MARK: - Version Section
-
-    private var versionSection: some View {
-        VStack(spacing: 12) {
-            Divider()
-
-            Button {
-                versionTapCount += 1
-                if versionTapCount >= 7 {
-                    showTokenInfo = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(10))
-                        showTokenInfo = false
-                        versionTapCount = 0
-                    }
-                }
-            } label: {
-                Text("Version \(appVersion)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal)
-
-            if showTokenInfo {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("version.oauth_token")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-
-                    HStack(spacing: 8) {
-                        Text(session.accessToken)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-
-                        Button {
-                            copyTokenToClipboard()
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.bordered)
-                        .help("action.copy_token")
-                    }
-
-                    Text(String(format: String(localized: "version.tap_count"), versionTapCount))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                .padding()
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(8)
-                .padding(.horizontal)
-            }
-        }
-        .padding(.bottom)
-    }
-
-    private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
-    }
-
-    private func copyTokenToClipboard() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(session.accessToken, forType: .string)
     }
 }
 
 // MARK: - Recently Played Section
 
 struct RecentContentSection: View {
-    let items: [RecentItem]
+    let items: [(id: String, album: Album?, playlist: Playlist?)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -303,17 +205,11 @@ struct RecentContentSection: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(items) { item in
-                        switch item {
-                        case let .album(album):
+                    ForEach(items, id: \.id) { item in
+                        if let album = item.album {
                             AlbumCard(album: album)
-
-                        case let .playlist(playlist):
+                        } else if let playlist = item.playlist {
                             PlaylistCard(playlist: playlist)
-
-                        case .artist:
-                            // Artists are filtered out by recentAlbumsAndPlaylists
-                            EmptyView()
                         }
                     }
                 }

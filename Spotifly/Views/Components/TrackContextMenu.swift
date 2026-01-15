@@ -30,16 +30,11 @@ struct TrackContextMenu: View {
     }
 
     var body: some View {
-        Button {
-            playNext()
-        } label: {
-            Label("track.menu.play_next", systemImage: "text.line.first.and.arrowtriangle.forward")
-        }
-
+        // Single unified action - "Play Next" adds to queue (plays before context tracks)
         Button {
             addToQueue()
         } label: {
-            Label("track.menu.add_to_queue", systemImage: "text.append")
+            Label("track.menu.play_next", systemImage: "text.line.first.and.arrowtriangle.forward")
         }
 
         Button {
@@ -127,16 +122,6 @@ struct TrackContextMenu: View {
         pasteboard.setString(externalUrl, forType: .string)
     }
 
-    private func playNext() {
-        Task {
-            let token = await session.validAccessToken()
-            await playbackViewModel.playNext(
-                trackUri: track.uri,
-                accessToken: token,
-            )
-        }
-    }
-
     private func addToQueue() {
         Task {
             let token = await session.validAccessToken()
@@ -152,24 +137,9 @@ struct TrackContextMenu: View {
             do {
                 let token = await session.validAccessToken()
                 await playbackViewModel.initializeIfNeeded(accessToken: token)
-
-                let radioTrackUris = try SpotifyPlayer.getRadioTracks(trackUri: track.uri)
-
-                if !radioTrackUris.isEmpty {
-                    let filteredRadioUris = radioTrackUris.filter { $0 != track.uri }
-                    var trackUris = [track.uri]
-                    trackUris.append(contentsOf: filteredRadioUris)
-
-                    await playbackViewModel.playTracks(
-                        trackUris,
-                        accessToken: token,
-                    )
-
-                    onNavigate?()
-                    navigationCoordinator.navigateToQueue()
-                } else {
-                    playbackViewModel.errorMessage = "No radio tracks found"
-                }
+                try SpotifyPlayer.playRadio(trackUri: track.uri)
+                onNavigate?()
+                navigationCoordinator.navigateToQueue()
             } catch {
                 playbackViewModel.errorMessage = "Failed to start radio: \(error.localizedDescription)"
             }

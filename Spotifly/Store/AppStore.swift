@@ -7,67 +7,18 @@
 //
 
 import Foundation
-import MediaPlayer
-import QuartzCore
 import SwiftUI
-
-// MARK: - Recent Item
-
-/// Mixed type for recently played albums, artists, and playlists
-enum RecentItem: Identifiable, Sendable {
-    case album(Album)
-    case artist(Artist)
-    case playlist(Playlist)
-
-    var id: String {
-        switch self {
-        case let .album(album): "album_\(album.id)"
-        case let .artist(artist): "artist_\(artist.id)"
-        case let .playlist(playlist): "playlist_\(playlist.id)"
-        }
-    }
-
-    var isArtist: Bool {
-        if case .artist = self { return true }
-        return false
-    }
-}
-
-// MARK: - Drift Correction Timer
-
-/// Helper class for periodic drift correction (not UI updates)
-/// Uses a plain Thread with isCancelled check to avoid Swift concurrency issues
-private final class DriftCorrectionTimer {
-    private var thread: Thread?
-    static let checkNotification = Notification.Name("DriftCorrectionCheck")
-
-    func start() {
-        let notificationName = DriftCorrectionTimer.checkNotification
-        let thread = Thread {
-            while !Thread.current.isCancelled {
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: notificationName, object: nil)
-                }
-                Thread.sleep(forTimeInterval: 1.0)
-            }
-        }
-        thread.name = "com.spotifly.drift-correction"
-        thread.qualityOfService = .utility
-        thread.start()
-        self.thread = thread
-    }
-
-    func stop() {
-        thread?.cancel()
-        thread = nil
-    }
-}
 
 // MARK: - App Store
 
 @MainActor
 @Observable
 final class AppStore {
+    #if DEBUG
+        /// Debug-only reference for menu commands
+        weak static var current: AppStore?
+    #endif
+
     // MARK: - Entity Tables (Normalized)
 
     /// All tracks indexed by ID - single source of truth
@@ -118,7 +69,8 @@ final class AppStore {
     // MARK: - Recently Played State
 
     private(set) var recentTrackIds: [String] = []
-    private(set) var recentItems: [RecentItem] = []
+    /// URIs of recent albums/artists/playlists (e.g., "spotify:album:123")
+    private(set) var recentItemURIs: [String] = []
     var recentlyPlayedIsLoading = false
     var recentlyPlayedErrorMessage: String?
     var hasLoadedRecentlyPlayed = false
@@ -137,76 +89,23 @@ final class AppStore {
     var newReleasesErrorMessage: String?
     var hasLoadedNewReleases = false
 
-    // MARK: - Queue State
+    // MARK: - Queue State (matches Spotify's prev/current/next structure)
 
-    var queueItems: [QueueItem] = []
+    /// Current track URI (from Mercury or Web API)
+    private(set) var currentTrackURI: String?
+    /// Previously played track URIs (from Mercury only - Web API doesn't provide this)
+    private(set) var previousTrackURIs: [String] = []
+    /// Next track URIs (from Mercury or Web API)
+    private(set) var nextTrackURIs: [String] = []
     var queueErrorMessage: String?
 
     // MARK: - Device Loading State
 
     var devicesIsLoading = false
     var devicesErrorMessage: String?
-
-    // MARK: - Spotify Connect State
-
-    var isSpotifyConnectActive = false
-    var spotifyConnectDeviceId: String?
-    var spotifyConnectDeviceName: String?
-    var spotifyConnectVolume: Double = 50
-
-    // Sync task state (stored here so ConnectService instances share it)
-    var connectSyncTask: Task<Void, Never>?
-    var connectVolumeUpdateTask: Task<Void, Never>?
-    var connectConsecutiveSyncFailures = 0
-
-    // MARK: - Playback State
-
-    var isPlaying = false
-    var isLoading = false
-    var currentTrackId: String?
-    var playbackError: String?
-    var queueLength: Int = 0
-    var currentIndex: Int = 0
-
-    /// Current track metadata for Now Playing display
-    var currentTrackName: String?
-    var currentArtistName: String?
-    var currentAlbumArtURL: String?
-    var trackDurationMs: UInt32 = 0
-    var currentPositionMs: UInt32 = 0
-
-    /// Volume (0.0 - 1.0), persisted to UserDefaults
-    var volume: Double = 0.5 {
-        didSet {
-            if isPlayerInitialized {
-                SpotifyPlayer.setVolume(volume)
-            }
-            UserDefaults.standard.set(volume, forKey: "playbackVolume")
-        }
-    }
-
-    /// Whether current track is favorited (for Now Playing bar)
-    var isCurrentTrackFavorited: Bool {
-        guard let trackId = extractTrackId(from: currentTrackId) else { return false }
-        return favoriteTrackIds.contains(trackId)
-    }
-
-    private(set) var isPlayerInitialized = false
-    private var lastAlbumArtURL: String?
-
-    // Position tracking
-    private var positionAnchorMs: UInt32 = 0
-    private var positionAnchorTime: Double = CACurrentMediaTime()
-    private var lastRustPosition: UInt32 = 0
-    private var driftCorrectionTimer: DriftCorrectionTimer?
-    private var driftObserver: NSObjectProtocol?
+    var activeDeviceId: String? // Tracks which device is currently active
 
     // MARK: - Computed Properties (Derived State)
-
-    /// Returns the URI of the currently playing track
-    var currentlyPlayingURI: String? {
-        SpotifyPlayer.queueUri(at: currentIndex) ?? currentTrackId
-    }
 
     /// User's playlists in display order
     var userPlaylists: [Playlist] {
@@ -248,41 +147,61 @@ final class AppStore {
         newReleaseAlbumIds.compactMap { albums[$0] }
     }
 
+    /// Recent albums and playlists (excludes artists) from URIs
+    var recentAlbumsAndPlaylists: [(id: String, album: Album?, playlist: Playlist?)] {
+        recentItemURIs.compactMap { uri -> (id: String, album: Album?, playlist: Playlist?)? in
+            if uri.hasPrefix("spotify:album:") {
+                let id = String(uri.dropFirst("spotify:album:".count))
+                guard let album = albums[id] else { return nil }
+                return (id: uri, album: album, playlist: nil)
+            } else if uri.hasPrefix("spotify:playlist:") {
+                let id = String(uri.dropFirst("spotify:playlist:".count))
+                guard let playlist = playlists[id] else { return nil }
+                return (id: uri, album: nil, playlist: playlist)
+            }
+            // Skip artists
+            return nil
+        }
+    }
+
+    // MARK: - Queue Computed Properties
+
+    /// Current track from the tracks store
+    var currentTrack: Track? {
+        guard let uri = currentTrackURI,
+              let id = SpotifyAPI.parseTrackURI(uri) else { return nil }
+        return tracks[id]
+    }
+
+    /// Previously played tracks from the tracks store
+    var previousTracks: [Track] {
+        previousTrackURIs.compactMap { uri in
+            guard let id = SpotifyAPI.parseTrackURI(uri) else { return nil }
+            return tracks[id]
+        }
+    }
+
+    /// Next tracks from the tracks store
+    var nextTracks: [Track] {
+        nextTrackURIs.compactMap { uri in
+            guard let id = SpotifyAPI.parseTrackURI(uri) else { return nil }
+            return tracks[id]
+        }
+    }
+
+    /// Total queue length
+    var queueLength: Int {
+        previousTrackURIs.count + (currentTrackURI != nil ? 1 : 0) + nextTrackURIs.count
+    }
+
+    /// Current track index within the full queue
+    var currentIndex: Int {
+        previousTrackURIs.count
+    }
+
     /// Active device (if any)
     var activeDevice: Device? {
         devices.values.first { $0.isActive }
-    }
-
-    /// Computed position using anchor interpolation - UI should bind to this
-    var interpolatedPositionMs: UInt32 {
-        guard isPlaying else { return currentPositionMs }
-        let elapsed = CACurrentMediaTime() - positionAnchorTime
-        let elapsedMs = UInt32(max(0, min(elapsed * 1000, Double(UInt32.max - 1))))
-        let interpolated = positionAnchorMs.addingReportingOverflow(elapsedMs).partialValue
-        return min(interpolated, trackDurationMs)
-    }
-
-    var hasNext: Bool { currentIndex + 1 < queueLength }
-    var hasPrevious: Bool { currentIndex > 0 }
-
-    // MARK: - Initialization
-
-    init() {
-        setupRemoteCommandCenter()
-
-        // Load saved volume
-        let savedVolume = UserDefaults.standard.double(forKey: "playbackVolume")
-        if savedVolume > 0 {
-            volume = savedVolume
-        }
-
-        // Set initial Now Playing info
-        var initialInfo: [String: Any] = [:]
-        initialInfo[MPMediaItemPropertyTitle] = "Spotifly"
-        initialInfo[MPNowPlayingInfoPropertyPlaybackRate] = 0.0
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = initialInfo
-
-        startPositionTimer()
     }
 
     // MARK: - Entity Mutations
@@ -475,8 +394,8 @@ final class AppStore {
         recentTrackIds = ids
     }
 
-    func setRecentItems(_ items: [RecentItem]) {
-        recentItems = items
+    func setRecentItemURIs(_ uris: [String]) {
+        recentItemURIs = uris
     }
 
     // MARK: - Top Items Actions
@@ -493,447 +412,92 @@ final class AppStore {
 
     // MARK: - Queue Actions
 
-    func setQueueItems(_ items: [QueueItem]) {
-        queueItems = items
+    /// Set queue state. If `previous` is nil, preserves existing previousTrackURIs (Web API case).
+    func setQueue(previous: [String]?, current: String?, next: [String]) {
+        if let previous {
+            previousTrackURIs = previous
+        }
+        currentTrackURI = current
+        nextTrackURIs = next
     }
 
-    // MARK: - Spotify Connect Actions
+    // MARK: - Debug
 
-    /// Activate Spotify Connect mode (playing on remote device)
-    func activateSpotifyConnect(deviceId: String, deviceName: String?) {
-        isSpotifyConnectActive = true
-        spotifyConnectDeviceId = deviceId
-        spotifyConnectDeviceName = deviceName
+    #if DEBUG
+        /// Dumps the entire store state as pretty-printed JSON to the console
+        func debugDumpJSON() {
+            struct StoreSnapshot: Encodable {
+                let tracks: [String: Track]
+                let albums: [String: Album]
+                let artists: [String: Artist]
+                let playlists: [String: Playlist]
+                let devices: [String: Device]
 
-        // Pause local playback when switching to Connect
-        if isPlaying {
-            SpotifyPlayer.pause()
-        }
-    }
+                let userPlaylistIds: [String]
+                let userAlbumIds: [String]
+                let userArtistIds: [String]
+                let favoriteTrackIds: [String]
+                let savedTrackIds: [String]
 
-    /// Deactivate Spotify Connect mode (return to local playback)
-    func deactivateSpotifyConnect() {
-        isSpotifyConnectActive = false
-        spotifyConnectDeviceId = nil
-        spotifyConnectDeviceName = nil
-    }
+                let playlistsPagination: PaginationState
+                let albumsPagination: PaginationState
+                let artistsPagination: PaginationState
+                let favoritesPagination: PaginationState
 
-    /// Update playback state from Spotify Connect sync
-    func updateFromConnectState(_ state: PlaybackState) {
-        isPlaying = state.isPlaying
-        spotifyConnectVolume = Double(state.device?.volumePercent ?? 50)
+                let searchResults: SearchResults?
 
-        if let track = state.currentTrack {
-            currentTrackId = track.uri
-            currentTrackName = track.name
-            currentArtistName = track.artistName
-            currentAlbumArtURL = track.imageURL?.absoluteString
-            trackDurationMs = UInt32(track.durationMs)
-            currentPositionMs = UInt32(state.progressMs)
-            positionAnchorMs = UInt32(state.progressMs)
-            positionAnchorTime = CACurrentMediaTime()
-            #if DEBUG
-                print("[AppStore] updateFromConnectState: position=\(currentPositionMs)ms, duration=\(trackDurationMs)ms, volume=\(spotifyConnectVolume)")
-            #endif
-            updateNowPlayingInfo()
-        }
-    }
+                let recentTrackIds: [String]
+                let recentItemURIs: [String]
 
-    // MARK: - Playback Control
+                let topArtistIds: [String]
+                let newReleaseAlbumIds: [String]
 
-    func initializePlayerIfNeeded(accessToken: String) async {
-        guard !isPlayerInitialized else { return }
+                let currentTrackURI: String?
+                let previousTrackURIs: [String]
+                let nextTrackURIs: [String]
 
-        isLoading = true
-        do {
-            try await SpotifyPlayer.initialize(accessToken: accessToken)
-            isPlayerInitialized = true
-            SpotifyPlayer.setVolume(volume)
-        } catch {
-            playbackError = error.localizedDescription
-        }
-        isLoading = false
-    }
-
-    func play(uriOrUrl: String, accessToken: String) async {
-        if !isPlayerInitialized {
-            await initializePlayerIfNeeded(accessToken: accessToken)
-        }
-
-        guard isPlayerInitialized else {
-            playbackError = "Player not initialized"
-            return
-        }
-
-        isLoading = true
-        playbackError = nil
-
-        do {
-            try await SpotifyPlayer.play(uriOrUrl: uriOrUrl)
-            handlePlaybackStarted(trackId: uriOrUrl)
-        } catch {
-            playbackError = error.localizedDescription
-        }
-
-        isLoading = false
-    }
-
-    func playTrack(trackId: String, accessToken: String) async {
-        await play(uriOrUrl: "spotify:track:\(trackId)", accessToken: accessToken)
-    }
-
-    func playTracks(_ trackUris: [String], accessToken: String) async {
-        if !isPlayerInitialized {
-            await initializePlayerIfNeeded(accessToken: accessToken)
-        }
-
-        guard isPlayerInitialized else {
-            playbackError = "Player not initialized"
-            return
-        }
-
-        guard !trackUris.isEmpty else {
-            playbackError = "No tracks to play"
-            return
-        }
-
-        isLoading = true
-        playbackError = nil
-
-        do {
-            try await SpotifyPlayer.playTracks(trackUris)
-            handlePlaybackStarted(trackId: trackUris[0])
-        } catch {
-            playbackError = error.localizedDescription
-        }
-
-        isLoading = false
-    }
-
-    func addToQueue(trackUri: String, accessToken: String) async {
-        if !isPlayerInitialized {
-            await initializePlayerIfNeeded(accessToken: accessToken)
-        }
-
-        guard isPlayerInitialized else {
-            playbackError = "Player not initialized"
-            return
-        }
-
-        playbackError = nil
-
-        do {
-            try await SpotifyPlayer.addToQueue(trackUri: trackUri)
-            updateQueueState()
-        } catch {
-            playbackError = error.localizedDescription
-        }
-    }
-
-    func playNext(trackUri: String, accessToken: String) async {
-        if !isPlayerInitialized {
-            await initializePlayerIfNeeded(accessToken: accessToken)
-        }
-
-        guard isPlayerInitialized else {
-            playbackError = "Player not initialized"
-            return
-        }
-
-        playbackError = nil
-
-        do {
-            try await SpotifyPlayer.addNextToQueue(trackUri: trackUri)
-            updateQueueState()
-        } catch {
-            playbackError = error.localizedDescription
-        }
-    }
-
-    func togglePlayPause(trackId: String, accessToken: String) async {
-        if isPlaying, currentTrackId == trackId {
-            SpotifyPlayer.pause()
-            isPlaying = false
-        } else if !isPlaying, currentTrackId == trackId {
-            SpotifyPlayer.resume()
-            isPlaying = true
-        } else {
-            await playTrack(trackId: trackId, accessToken: accessToken)
-        }
-    }
-
-    func stop() {
-        SpotifyPlayer.stop()
-        isPlaying = false
-        currentTrackId = nil
-    }
-
-    func next() {
-        do {
-            try SpotifyPlayer.next()
-            isPlaying = true
-            updateQueueState()
-            syncPositionAnchor()
-            updateNowPlayingInfo()
-        } catch {
-            playbackError = error.localizedDescription
-        }
-    }
-
-    func previous() {
-        do {
-            try SpotifyPlayer.previous()
-            isPlaying = true
-            updateQueueState()
-            syncPositionAnchor()
-            updateNowPlayingInfo()
-        } catch {
-            playbackError = error.localizedDescription
-        }
-    }
-
-    func seek(to positionMs: UInt32) {
-        do {
-            try SpotifyPlayer.seek(positionMs: positionMs)
-            positionAnchorMs = positionMs
-            positionAnchorTime = CACurrentMediaTime()
-            currentPositionMs = positionMs
-            updateNowPlayingInfo()
-        } catch {
-            playbackError = error.localizedDescription
-        }
-    }
-
-    func getQueueTrackName(at index: Int) -> String? {
-        SpotifyPlayer.queueTrackName(at: index)
-    }
-
-    func getQueueArtistName(at index: Int) -> String? {
-        SpotifyPlayer.queueArtistName(at: index)
-    }
-
-    // MARK: - Private Playback Helpers
-
-    private func handlePlaybackStarted(trackId: String) {
-        currentTrackId = trackId
-        isPlaying = true
-        SpotifyPlayer.setVolume(volume)
-        updateQueueState()
-        syncPositionAnchor()
-    }
-
-    func updatePlayingState() {
-        isPlaying = SpotifyPlayer.isPlaying
-    }
-
-    func updateQueueState() {
-        queueLength = SpotifyPlayer.queueLength
-        currentIndex = SpotifyPlayer.currentIndex
-
-        if queueLength > 0, currentIndex < queueLength {
-            currentTrackName = SpotifyPlayer.queueTrackName(at: currentIndex)
-            currentArtistName = SpotifyPlayer.queueArtistName(at: currentIndex)
-            currentAlbumArtURL = SpotifyPlayer.queueAlbumArtUrl(at: currentIndex)
-            trackDurationMs = SpotifyPlayer.queueDurationMs(at: currentIndex)
-            updateNowPlayingInfo()
-        }
-    }
-
-    private func syncPositionAnchor() {
-        let rustPosition = SpotifyPlayer.positionMs
-        positionAnchorMs = rustPosition
-        positionAnchorTime = CACurrentMediaTime()
-        lastRustPosition = rustPosition
-        currentPositionMs = rustPosition
-    }
-
-    private func startPositionTimer() {
-        let timer = DriftCorrectionTimer()
-
-        driftObserver = NotificationCenter.default.addObserver(
-            forName: DriftCorrectionTimer.checkNotification,
-            object: nil,
-            queue: .main,
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkDriftAndSync()
+                let activeDeviceId: String?
             }
-        }
 
-        timer.start()
-        driftCorrectionTimer = timer
-    }
+            let snapshot = StoreSnapshot(
+                tracks: tracks,
+                albums: albums,
+                artists: artists,
+                playlists: playlists,
+                devices: devices,
+                userPlaylistIds: userPlaylistIds,
+                userAlbumIds: userAlbumIds,
+                userArtistIds: userArtistIds,
+                favoriteTrackIds: Array(favoriteTrackIds),
+                savedTrackIds: savedTrackIds,
+                playlistsPagination: playlistsPagination,
+                albumsPagination: albumsPagination,
+                artistsPagination: artistsPagination,
+                favoritesPagination: favoritesPagination,
+                searchResults: searchResults,
+                recentTrackIds: recentTrackIds,
+                recentItemURIs: recentItemURIs,
+                topArtistIds: topArtistIds,
+                newReleaseAlbumIds: newReleaseAlbumIds,
+                currentTrackURI: currentTrackURI,
+                previousTrackURIs: previousTrackURIs,
+                nextTrackURIs: nextTrackURIs,
+                activeDeviceId: activeDeviceId,
+            )
 
-    private func checkDriftAndSync() {
-        // Skip Rust sync when Spotify Connect is active (sync handled by ConnectService)
-        guard !isSpotifyConnectActive else {
-            currentPositionMs = interpolatedPositionMs
-            updateNowPlayingInfo()
-            return
-        }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
-        let rustCurrentIndex = SpotifyPlayer.currentIndex
-        if rustCurrentIndex != currentIndex {
-            currentIndex = rustCurrentIndex
-            isPlaying = SpotifyPlayer.isPlaying
-            updateQueueState()
-            syncPositionAnchor()
-            return
-        }
-
-        let rustIsPlaying = SpotifyPlayer.isPlaying
-        if rustIsPlaying != isPlaying {
-            isPlaying = rustIsPlaying
-            syncPositionAnchor()
-        }
-
-        currentPositionMs = interpolatedPositionMs
-
-        let rustPosition = SpotifyPlayer.positionMs
-        if rustPosition != lastRustPosition {
-            let drift = abs(Int32(rustPosition) - Int32(interpolatedPositionMs))
-            if drift > 500 {
-                positionAnchorMs = rustPosition
-                positionAnchorTime = CACurrentMediaTime()
-                currentPositionMs = min(rustPosition, trackDurationMs)
-            }
-            lastRustPosition = rustPosition
-        }
-
-        updateNowPlayingInfo()
-    }
-
-    private func extractTrackId(from uri: String?) -> String? {
-        guard let uri else { return nil }
-        let components = uri.split(separator: ":")
-        guard components.count >= 3, components[0] == "spotify", components[1] == "track" else {
-            return nil
-        }
-        return String(components[2])
-    }
-
-    // MARK: - Now Playing Info
-
-    func updateNowPlayingInfo() {
-        guard trackDurationMs > 0 else { return }
-
-        var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-
-        if let trackName = currentTrackName {
-            nowPlayingInfo[MPMediaItemPropertyTitle] = trackName
-        }
-
-        if let artistName = currentArtistName {
-            nowPlayingInfo[MPMediaItemPropertyArtist] = artistName
-        }
-
-        let validPosition = min(currentPositionMs, trackDurationMs)
-        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = Double(trackDurationMs) / 1000.0
-        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(validPosition) / 1000.0
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
-
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-
-        if let artURL = currentAlbumArtURL, artURL != lastAlbumArtURL, !artURL.isEmpty, let url = URL(string: artURL) {
-            lastAlbumArtURL = artURL
-
-            Task {
-                do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
-                    guard let image = NSImage(data: data) else { return }
-
-                    await MainActor.run {
-                        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-                        info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { @Sendable _ in
-                            image
-                        }
-                        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-                    }
-                } catch {
-                    // Ignore album art download failures
+            do {
+                let data = try encoder.encode(snapshot)
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(jsonString, forType: .string)
+                    print("[Debug] AppStore state copied to clipboard (\(jsonString.count) chars)")
                 }
+            } catch {
+                print("[Debug] Failed to encode AppStore state: \(error)")
             }
         }
-    }
-
-    // MARK: - Remote Command Center
-
-    private func setupRemoteCommandCenter() {
-        let commandCenter = MPRemoteCommandCenter.shared()
-
-        commandCenter.playCommand.removeTarget(nil)
-        commandCenter.pauseCommand.removeTarget(nil)
-        commandCenter.togglePlayPauseCommand.removeTarget(nil)
-        commandCenter.nextTrackCommand.removeTarget(nil)
-        commandCenter.previousTrackCommand.removeTarget(nil)
-        commandCenter.changePlaybackPositionCommand.removeTarget(nil)
-
-        commandCenter.playCommand.isEnabled = true
-        commandCenter.pauseCommand.isEnabled = true
-        commandCenter.togglePlayPauseCommand.isEnabled = true
-        commandCenter.nextTrackCommand.isEnabled = true
-        commandCenter.previousTrackCommand.isEnabled = true
-        commandCenter.changePlaybackPositionCommand.isEnabled = true
-
-        commandCenter.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if !self.isPlaying {
-                    SpotifyPlayer.resume()
-                    self.isPlaying = true
-                    self.updateNowPlayingInfo()
-                }
-            }
-            return .success
-        }
-
-        commandCenter.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if self.isPlaying {
-                    SpotifyPlayer.pause()
-                    self.isPlaying = false
-                    self.updateNowPlayingInfo()
-                }
-            }
-            return .success
-        }
-
-        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if self.isPlaying {
-                    SpotifyPlayer.pause()
-                    self.isPlaying = false
-                } else {
-                    SpotifyPlayer.resume()
-                    self.isPlaying = true
-                }
-                self.updateNowPlayingInfo()
-            }
-            return .success
-        }
-
-        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            next()
-            return .success
-        }
-
-        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            previous()
-            return .success
-        }
-
-        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
-            Task { @MainActor in
-                guard let self else { return }
-                guard let seekEvent = event as? MPChangePlaybackPositionCommandEvent else { return }
-                let positionMs = UInt32(seekEvent.positionTime * 1000)
-                self.seek(to: positionMs)
-            }
-            return .success
-        }
-    }
+    #endif
 }

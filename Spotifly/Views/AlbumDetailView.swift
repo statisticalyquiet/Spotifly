@@ -162,17 +162,11 @@ struct AlbumDetailView: View {
 
                         // Context menu
                         Menu {
-                            Button {
-                                playNext()
-                            } label: {
-                                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-                            }
-                            .disabled(tracks.isEmpty)
-
+                            // Single unified action - "Play Next" adds to queue
                             Button {
                                 addToQueue()
                             } label: {
-                                Label("Add to Queue", systemImage: "text.append")
+                                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
                             }
                             .disabled(tracks.isEmpty)
 
@@ -267,24 +261,12 @@ struct AlbumDetailView: View {
     }
 
     private func playAllTracks() {
+        guard let album else { return }
         Task {
             let token = await session.validAccessToken()
-            await playbackViewModel.playTracks(
-                tracks.map(\.uri),
-                accessToken: token,
-            )
-        }
-    }
-
-    private func playNext() {
-        Task {
-            let token = await session.validAccessToken()
-            for track in tracks.reversed() {
-                await playbackViewModel.playNext(
-                    trackUri: track.uri,
-                    accessToken: token,
-                )
-            }
+            // Use album URI to load via Spirc.load(LoadRequest::from_context_uri())
+            // This properly loads the album context instead of individual tracks
+            await playbackViewModel.play(uriOrUrl: album.uri, accessToken: token)
         }
     }
 

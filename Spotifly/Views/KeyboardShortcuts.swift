@@ -50,13 +50,10 @@ private struct PlaybackShortcutsView: View {
             // Space - Play/Pause
             Button("") {
                 if playbackViewModel.isPlaying {
-                    SpotifyPlayer.pause()
-                    playbackViewModel.isPlaying = false
+                    playbackViewModel.pause()
                 } else {
-                    SpotifyPlayer.resume()
-                    playbackViewModel.isPlaying = true
+                    playbackViewModel.resume()
                 }
-                playbackViewModel.updateNowPlayingInfo()
             }
             .keyboardShortcut(" ", modifiers: [])
 

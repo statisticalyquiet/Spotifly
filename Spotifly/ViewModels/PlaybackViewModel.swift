@@ -5,6 +5,7 @@
 //  Created by Ralph von der Heyden on 30.12.25.
 //
 
+import Combine
 import QuartzCore
 import SwiftUI
 
@@ -51,23 +52,22 @@ final class PlaybackViewModel {
 
     var isPlaying = false
     var isLoading = false
-    var currentTrackId: String?
+    var currentTrackUri: String?
     var errorMessage: String?
-    var queueLength: Int = 0
-    var currentIndex: Int = 0
 
-    /// Returns the URI of the currently playing track
+    /// Returns the URI of the currently playing track (alias for currentTrackUri)
     var currentlyPlayingURI: String? {
-        // Try to get URI from queue first, fallback to currentTrackId for single tracks
-        SpotifyPlayer.queueUri(at: currentIndex) ?? currentTrackId
+        currentTrackUri
     }
 
-    // Track metadata for Now Playing
-    var currentTrackName: String?
-    var currentArtistName: String?
-    var currentAlbumArtURL: String?
+    // Playback state from Mercury (duration/position for progress bar)
     var trackDurationMs: UInt32 = 0
     var currentPositionMs: UInt32 = 0
+
+    // Current track metadata for Now Playing info (set by QueueService)
+    private(set) var currentTrackName: String?
+    private(set) var currentArtistName: String?
+    private(set) var currentAlbumArtURL: String?
 
     // Volume (0.0 - 1.0)
     var volume: Double = 0.5 {
@@ -85,8 +85,10 @@ final class PlaybackViewModel {
 
     private var isInitialized = false
     private var lastAlbumArtURL: String?
+    private var playbackStateSubscription: AnyCancellable?
 
     private init() {
+        setupPlaybackStateSubscription()
         setupRemoteCommandCenter()
 
         // Load saved volume (but don't apply it yet - mixer isn't initialized)
@@ -113,6 +115,30 @@ final class PlaybackViewModel {
         do {
             try await SpotifyPlayer.initialize(accessToken: accessToken)
             isInitialized = true
+
+            // Wait for Spirc to be ready (poll with timeout)
+            var spircReady = false
+            for _ in 0 ..< 50 { // 5 seconds max
+                if SpotifyPlayer.isSpircReady {
+                    spircReady = true
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+
+            if spircReady {
+                // Fetch devices and check if any is active
+                let response = try? await SpotifyAPI.fetchAvailableDevices(accessToken: accessToken)
+                let hasActiveDevice = response?.devices.contains { $0.isActive } ?? false
+
+                // If no active device, activate ourselves
+                if !hasActiveDevice {
+                    #if DEBUG
+                        print("[Spotifly] No active device found, activating local player")
+                    #endif
+                    try? SpotifyPlayer.transferToLocal()
+                }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -190,31 +216,15 @@ final class PlaybackViewModel {
         errorMessage = nil
 
         do {
-            try await SpotifyPlayer.addToQueue(trackUri: trackUri)
-            // Update queue state to reflect the change
-            updateQueueState()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    func playNext(trackUri: String, accessToken: String) async {
-        // Initialize if needed
-        if !isInitialized {
-            await initializeIfNeeded(accessToken: accessToken)
-        }
-
-        guard isInitialized else {
-            errorMessage = "Player not initialized"
-            return
-        }
-
-        errorMessage = nil
-
-        do {
-            try await SpotifyPlayer.addNextToQueue(trackUri: trackUri)
-            // Update queue state to reflect the change
-            updateQueueState()
+            // Use Web API to add to queue - this goes through Spotify's servers
+            // and syncs with Spirc via dealer for proper Connect state
+            try await SpotifyAPI.addToQueue(trackUri: trackUri, accessToken: accessToken)
+            // Small delay for Spotify's servers to process the queue addition
+            try? await Task.sleep(for: .milliseconds(500))
+            // Refresh queue from Web API since Mercury doesn't notify us of queue changes
+            await SpotifyPlayer.refreshQueue()
+            // Update now playing metadata (e.g., queue count) - position update skipped by default
+            updateNowPlayingInfo()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -224,21 +234,21 @@ final class PlaybackViewModel {
 
     /// Common setup after playback has started
     private func handlePlaybackStarted(trackId: String) {
-        currentTrackId = trackId
+        currentTrackUri = trackId
         isPlaying = true
         // Apply volume after playback starts (mixer is now initialized)
         SpotifyPlayer.setVolume(volume)
-        updateQueueState()
+        updateNowPlayingInfo(forcePositionUpdate: true)
         syncPositionAnchor()
-        // Note: favorite status is checked by NowPlayingBarView's .task(id:) when currentTrackId changes
+        // Note: favorite status is checked by NowPlayingBarView's .task(id:) when currentTrackUri changes
     }
 
     func togglePlayPause(trackId: String, accessToken: String) async {
-        if isPlaying, currentTrackId == trackId {
+        if isPlaying, currentTrackUri == trackId {
             // Pause current track
             SpotifyPlayer.pause()
             isPlaying = false
-        } else if !isPlaying, currentTrackId == trackId {
+        } else if !isPlaying, currentTrackUri == trackId {
             // Resume current track
             SpotifyPlayer.resume()
             isPlaying = true
@@ -251,35 +261,30 @@ final class PlaybackViewModel {
     func stop() {
         SpotifyPlayer.stop()
         isPlaying = false
-        currentTrackId = nil
+        currentTrackUri = nil
     }
 
     func updatePlayingState() {
         isPlaying = SpotifyPlayer.isPlaying
     }
 
-    func updateQueueState() {
-        queueLength = SpotifyPlayer.queueLength
-        currentIndex = SpotifyPlayer.currentIndex
-
-        // Update current track metadata
-        if queueLength > 0, currentIndex < queueLength {
-            currentTrackName = SpotifyPlayer.queueTrackName(at: currentIndex)
-            currentArtistName = SpotifyPlayer.queueArtistName(at: currentIndex)
-            currentAlbumArtURL = SpotifyPlayer.queueAlbumArtUrl(at: currentIndex)
-            trackDurationMs = SpotifyPlayer.queueDurationMs(at: currentIndex)
-            // Position is synced separately via syncPositionAnchor()
-            updateNowPlayingInfo()
-        }
+    /// Updates current track metadata for Now Playing info center.
+    /// Called by QueueService when the current track changes.
+    func setCurrentTrackMetadata(name: String?, artist: String?, artURL: String?) {
+        currentTrackName = name
+        currentArtistName = artist
+        currentAlbumArtURL = artURL
+        updateNowPlayingInfo()
     }
+
+    // MARK: - Playback Control (via Spirc)
+
+    // All playback control uses local Spirc - state updates come back via Mercury callback
 
     func next() {
         do {
             try SpotifyPlayer.next()
-            isPlaying = true
-            updateQueueState()
-            syncPositionAnchor()
-            updateNowPlayingInfo()
+            // State update will come from Mercury callback
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -288,10 +293,7 @@ final class PlaybackViewModel {
     func previous() {
         do {
             try SpotifyPlayer.previous()
-            isPlaying = true
-            updateQueueState()
-            syncPositionAnchor()
-            updateNowPlayingInfo()
+            // State update will come from Mercury callback
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -304,27 +306,27 @@ final class PlaybackViewModel {
             positionAnchorMs = positionMs
             positionAnchorTime = CACurrentMediaTime()
             currentPositionMs = positionMs
-            updateNowPlayingInfo()
+            updateNowPlayingInfo(forcePositionUpdate: true)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func getQueueTrackName(at index: Int) -> String? {
-        SpotifyPlayer.queueTrackName(at: index)
+    func pause() {
+        SpotifyPlayer.pause()
+        // State update will come from Mercury callback
     }
 
-    func getQueueArtistName(at index: Int) -> String? {
-        SpotifyPlayer.queueArtistName(at: index)
+    func resume() {
+        SpotifyPlayer.resume()
+        // State update will come from Mercury callback
     }
 
-    var hasNext: Bool {
-        currentIndex + 1 < queueLength
-    }
+    /// Always returns true - Web API handles next track availability
+    var hasNext: Bool { true }
 
-    var hasPrevious: Bool {
-        currentIndex > 0
-    }
+    /// Always returns true - Web API handles previous track availability
+    var hasPrevious: Bool { true }
 
     // MARK: - Media Keys & Now Playing
 
@@ -354,7 +356,7 @@ final class PlaybackViewModel {
                 if !self.isPlaying {
                     SpotifyPlayer.resume()
                     self.isPlaying = true
-                    self.updateNowPlayingInfo()
+                    self.updateNowPlayingInfo(forcePositionUpdate: true)
                 }
             }
             return .success
@@ -367,7 +369,7 @@ final class PlaybackViewModel {
                 if self.isPlaying {
                     SpotifyPlayer.pause()
                     self.isPlaying = false
-                    self.updateNowPlayingInfo()
+                    self.updateNowPlayingInfo(forcePositionUpdate: true)
                 }
             }
             return .success
@@ -384,7 +386,7 @@ final class PlaybackViewModel {
                     SpotifyPlayer.resume()
                     self.isPlaying = true
                 }
-                self.updateNowPlayingInfo()
+                self.updateNowPlayingInfo(forcePositionUpdate: true)
             }
             return .success
         }
@@ -415,7 +417,10 @@ final class PlaybackViewModel {
         }
     }
 
-    func updateNowPlayingInfo() {
+    /// Updates the system's Now Playing info (Control Center, Lock Screen).
+    /// - Parameter forcePositionUpdate: When true, updates elapsed time. When false (default),
+    ///   skips elapsed time to prevent seek bar flicker. Pass true for: new track, seek, play/pause.
+    func updateNowPlayingInfo(forcePositionUpdate: Bool = false) {
         // Don't update Now Playing with invalid data - causes --:-- display
         guard trackDurationMs > 0 else { return }
 
@@ -429,10 +434,16 @@ final class PlaybackViewModel {
             nowPlayingInfo[MPMediaItemPropertyArtist] = artistName
         }
 
-        // Duration and position - ensure position doesn't exceed duration
-        let validPosition = min(currentPositionMs, trackDurationMs)
         nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = Double(trackDurationMs) / 1000.0
-        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(validPosition) / 1000.0
+
+        // Only update elapsed time when explicitly requested to prevent seek bar flicker.
+        // The system smoothly interpolates position based on playback rate, so setting
+        // elapsed time unnecessarily resets that interpolation and causes a visible jump.
+        if forcePositionUpdate {
+            let validPosition = min(currentPositionMs, trackDurationMs)
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(validPosition) / 1000.0
+        }
+
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
 
         // Update Now Playing (preserves existing artwork)
@@ -462,6 +473,57 @@ final class PlaybackViewModel {
                     // Ignore album art download failures
                 }
             }
+        }
+    }
+
+    // MARK: - Playback State Subscription
+
+    /// Subscribe to playback state updates from Mercury/Spirc
+    /// This allows external control (e.g., pause from phone) to be reflected in the app
+    private func setupPlaybackStateSubscription() {
+        playbackStateSubscription = SpotifyPlayer.playbackState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                self?.handlePlaybackStateUpdate(state)
+            }
+    }
+
+    /// Handle playback state update from Spirc callback
+    private func handlePlaybackStateUpdate(_ state: PlaybackState?) {
+        guard let state else { return }
+
+        #if DEBUG
+            print("[PlaybackViewModel] Playback state update: playing=\(state.isPlaying), paused=\(state.isPaused), uri=\(state.trackUri)")
+        #endif
+
+        // Update playing state
+        // is_playing = true means actively playing audio
+        // is_paused = true means paused (not playing but has a track loaded)
+        let wasPlaying = isPlaying
+        isPlaying = state.isPlaying && !state.isPaused
+
+        // Update track if changed
+        if !state.trackUri.isEmpty, state.trackUri != currentTrackUri {
+            currentTrackUri = state.trackUri
+            // Note: Track metadata (name, artist, etc.) will be updated from queue
+        }
+
+        // Update duration
+        if state.durationMs > 0 {
+            trackDurationMs = UInt32(state.durationMs)
+        }
+
+        // Sync position anchor on state changes
+        if state.positionMs >= 0 {
+            let posMs = UInt32(state.positionMs)
+            positionAnchorMs = posMs
+            positionAnchorTime = CACurrentMediaTime()
+            currentPositionMs = posMs
+        }
+
+        // Update Now Playing info if state changed
+        if wasPlaying != isPlaying {
+            updateNowPlayingInfo()
         }
     }
 
@@ -514,23 +576,14 @@ final class PlaybackViewModel {
 
     /// Called every second to check for drift and sync state
     private func checkDriftAndSync() {
-        // Check if track changed (auto-advance)
-        let rustCurrentIndex = SpotifyPlayer.currentIndex
-        if rustCurrentIndex != currentIndex {
-            currentIndex = rustCurrentIndex
-            isPlaying = SpotifyPlayer.isPlaying
-            updateQueueState()
-            syncPositionAnchor()
-            // Update currentTrackId to trigger favorite status check in NowPlayingBarView
-            currentTrackId = SpotifyPlayer.queueUri(at: currentIndex)
-            return
-        }
+        var didCorrectDrift = false
 
         // Sync playing state with Rust
         let rustIsPlaying = SpotifyPlayer.isPlaying
         if rustIsPlaying != isPlaying {
             isPlaying = rustIsPlaying
             syncPositionAnchor()
+            didCorrectDrift = true
         }
 
         // Update currentPositionMs for non-TimelineView consumers
@@ -545,17 +598,18 @@ final class PlaybackViewModel {
                 positionAnchorMs = rustPosition
                 positionAnchorTime = CACurrentMediaTime()
                 currentPositionMs = min(rustPosition, trackDurationMs)
+                didCorrectDrift = true
             }
             lastRustPosition = rustPosition
         }
 
-        updateNowPlayingInfo()
+        updateNowPlayingInfo(forcePositionUpdate: didCorrectDrift)
     }
 
     // MARK: - Favorite Management
 
     func checkCurrentTrackFavoriteStatus(accessToken: String) async {
-        guard let trackId = extractTrackId(from: currentTrackId) else {
+        guard let uri = currentTrackUri, let trackId = SpotifyAPI.parseTrackURI(uri) else {
             isCurrentTrackFavorited = false
             return
         }
@@ -566,13 +620,15 @@ final class PlaybackViewModel {
                 trackId: trackId,
             )
         } catch {
-            print("Error checking favorite status: \(error)")
+            #if DEBUG
+                print("Error checking favorite status: \(error)")
+            #endif
             isCurrentTrackFavorited = false
         }
     }
 
     func toggleCurrentTrackFavorite(accessToken: String) async {
-        guard let trackId = extractTrackId(from: currentTrackId) else {
+        guard let uri = currentTrackUri, let trackId = SpotifyAPI.parseTrackURI(uri) else {
             return
         }
 
@@ -587,18 +643,6 @@ final class PlaybackViewModel {
         } catch {
             errorMessage = error.localizedDescription
         }
-    }
-
-    private func extractTrackId(from uri: String?) -> String? {
-        guard let uri else { return nil }
-
-        // URI format: spotify:track:TRACK_ID
-        let components = uri.split(separator: ":")
-        guard components.count >= 3, components[0] == "spotify", components[1] == "track" else {
-            return nil
-        }
-
-        return String(components[2])
     }
 
     // MARK: - Volume Persistence

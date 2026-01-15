@@ -155,7 +155,7 @@ enum SearchType: String, Sendable {
 }
 
 /// Search results wrapper (uses unified Entity types)
-struct SearchResults: Sendable {
+struct SearchResults: Sendable, Encodable {
     let albums: [Album]
     let artists: [Artist]
     let playlists: [Playlist]
@@ -201,22 +201,6 @@ struct DevicesResponse: Sendable {
     let devices: [SpotifyDevice]
 }
 
-/// Current playback state from Spotify
-struct PlaybackState: Sendable {
-    let currentTrack: APITrack?
-    let device: SpotifyDevice?
-    let isPlaying: Bool
-    let progressMs: Int
-    let repeatState: String
-    let shuffleState: Bool
-}
-
-/// Queue response from Spotify
-struct QueueResponse: Sendable {
-    let currentlyPlaying: APITrack?
-    let queue: [APITrack]
-}
-
 // MARK: - User Top Items
 
 /// Time range for top items (artists/tracks)
@@ -239,10 +223,7 @@ struct TrackMetadata: Sendable {
     let previewURL: URL?
 
     var durationFormatted: String {
-        let totalSeconds = durationMs / 1000
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
+        formatTrackTime(milliseconds: durationMs)
     }
 }
 
@@ -596,6 +577,11 @@ struct ArtistTopTracksCodable: Decodable {
     let tracks: [TrackCodable]
 }
 
+// Multiple tracks (batch fetch)
+struct MultipleTracksCodable: Decodable {
+    let tracks: [TrackCodable?] // Can contain nulls for not-found tracks
+}
+
 // User albums
 struct UserAlbumsCodable: Decodable {
     let items: [UserAlbumItemCodable]
@@ -652,53 +638,6 @@ struct DevicesCodable: Decodable {
     let devices: [DeviceCodable]
 }
 
-// Playback state
-struct PlaybackStateCodable: Decodable {
-    let device: DeviceCodable?
-    let item: TrackCodable?
-    let isPlaying: Bool?
-    let progressMs: Int?
-    let shuffleState: Bool?
-    let repeatState: String?
-
-    enum CodingKeys: String, CodingKey {
-        case device, item
-        case isPlaying = "is_playing"
-        case progressMs = "progress_ms"
-        case shuffleState = "shuffle_state"
-        case repeatState = "repeat_state"
-    }
-
-    func toPlaybackState() -> PlaybackState {
-        PlaybackState(
-            currentTrack: item?.toAPITrack(),
-            device: device?.toSpotifyDevice(),
-            isPlaying: isPlaying ?? false,
-            progressMs: progressMs ?? 0,
-            repeatState: repeatState ?? "off",
-            shuffleState: shuffleState ?? false,
-        )
-    }
-}
-
-// Queue
-struct QueueCodable: Decodable {
-    let currentlyPlaying: TrackCodable?
-    let queue: [TrackCodable]?
-
-    enum CodingKeys: String, CodingKey {
-        case currentlyPlaying = "currently_playing"
-        case queue
-    }
-
-    func toQueueResponse() -> QueueResponse {
-        QueueResponse(
-            currentlyPlaying: currentlyPlaying?.toAPITrack(),
-            queue: queue?.map { $0.toAPITrack() } ?? [],
-        )
-    }
-}
-
 // Recently played
 struct RecentlyPlayedCodable: Decodable {
     let items: [RecentlyPlayedItemCodable]
@@ -726,11 +665,6 @@ struct RecentlyPlayedCodable: Decodable {
         }
         return RecentlyPlayedResponse(items: items)
     }
-}
-
-// Recommendations
-struct RecommendationsCodable: Decodable {
-    let tracks: [TrackCodable]
 }
 
 // Search results

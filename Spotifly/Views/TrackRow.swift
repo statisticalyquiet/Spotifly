@@ -21,26 +21,18 @@ struct TrackRowData: Identifiable {
     let externalUrl: String? // Web URL for sharing
 
     var durationFormatted: String {
-        let totalSeconds = durationMs / 1000
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
+        formatTrackTime(milliseconds: durationMs)
     }
 
     /// Extracts the track ID for API calls (handles both plain IDs and URIs)
     var trackId: String {
-        // If id looks like a URI (spotify:track:xxx), extract just the ID
-        if id.hasPrefix("spotify:track:") {
-            return String(id.dropFirst("spotify:track:".count))
-        }
-        return id
+        SpotifyAPI.parseTrackURI(id) ?? id
     }
 }
 
 /// Double-tap behavior for TrackRow
 enum TrackRowDoubleTapBehavior {
     case playTrack // Play just this track
-    case jumpToQueueIndex // Jump to this index in the queue (for QueueListView)
 }
 
 /// Reusable track row view
@@ -248,14 +240,6 @@ struct TrackRow: View {
                     uriOrUrl: track.uri,
                     accessToken: token,
                 )
-            }
-        case .jumpToQueueIndex:
-            guard let index else { return }
-            do {
-                try SpotifyPlayer.jumpToIndex(index)
-                playbackViewModel.updateQueueState()
-            } catch {
-                playbackViewModel.errorMessage = error.localizedDescription
             }
         }
     }
