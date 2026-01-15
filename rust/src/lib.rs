@@ -22,7 +22,7 @@ use librespot_protocol::player::PlayerState;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::ffi::{c_char, CStr, CString};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime;
@@ -50,6 +50,8 @@ static PLAYER_EVENT_TX: Lazy<Mutex<Option<mpsc::UnboundedSender<()>>>> = Lazy::n
 static QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> = Lazy::new(|| Mutex::new(None));
 static PLAYBACK_STATE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> = Lazy::new(|| Mutex::new(None));
 static STATE_UPDATE_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> = Lazy::new(|| Mutex::new(None));
+static VOLUME_CALLBACK: Lazy<Mutex<Option<extern "C" fn(u16)>>> = Lazy::new(|| Mutex::new(None));
+static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Position tracking - updated from player events
 static POSITION_MS: AtomicU32 = AtomicU32::new(0);
@@ -176,6 +178,15 @@ pub extern "C" fn spotifly_register_playback_state_callback(callback: extern "C"
 #[no_mangle]
 pub extern "C" fn spotifly_register_state_update_callback(callback: extern "C" fn()) {
     let mut cb = STATE_UPDATE_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Registers a callback to receive volume change notifications.
+/// Called when the volume is changed remotely (e.g., from another Spotify Connect device).
+/// The callback receives the new volume (0-65535).
+#[no_mangle]
+pub extern "C" fn spotifly_register_volume_callback(callback: extern "C" fn(u16)) {
+    let mut cb = VOLUME_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
 
@@ -342,6 +353,10 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 callback();
                             }
                         }
+                        Some(PlayerEvent::VolumeChanged { volume }) => {
+                            debug_println!("[Spotifly] VolumeChanged event: {}", volume);
+                            check_and_send_volume(volume as u32);
+                        }
                         None => break,
                         _ => {}
                     }
@@ -372,7 +387,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
         librespot_core::dealer::protocol::Message::from_raw::<ClusterUpdate>
     ).map_err(|e| format!("Failed to subscribe to queue: {}", e))?;
 
-    // Spawn task to process cluster updates (queue + playback state)
+    // Spawn task to process cluster updates (queue + playback state + volume)
     RUNTIME.spawn(async move {
         debug_println!("[Spotifly] Cluster listener task started");
         let mut stream = queue_stream;
@@ -383,6 +398,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                     debug_println!("[Spotifly] ClusterUpdate parsed successfully");
                     if let Some(cluster) = cluster_update.cluster.into_option() {
                         debug_println!("[Spotifly] Cluster present");
+
                         if let Some(player_state) = cluster.player_state.into_option() {
                             debug_println!("[Spotifly] PlayerState present");
                             // Send playback state update
@@ -445,6 +461,24 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Checks if volume changed and sends callback if so
+fn check_and_send_volume(volume: u32) {
+    let volume_u16 = volume as u16;
+    let last = LAST_VOLUME.load(Ordering::SeqCst);
+
+    // Only send callback if volume actually changed
+    if volume_u16 != last {
+        LAST_VOLUME.store(volume_u16, Ordering::SeqCst);
+        debug_println!("[Spotifly] Volume changed: {} -> {}", last, volume_u16);
+
+        let cb_guard = VOLUME_CALLBACK.lock().unwrap();
+        if let Some(callback) = *cb_guard {
+            drop(cb_guard);
+            callback(volume_u16);
+        }
+    }
 }
 
 fn send_playback_state(player_state: &PlayerState) {

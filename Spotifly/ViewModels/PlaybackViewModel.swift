@@ -72,6 +72,8 @@ final class PlaybackViewModel {
     // Volume (0.0 - 1.0)
     var volume: Double = 0.5 {
         didSet {
+            // Skip applying to Spirc if this change came from a remote volume callback
+            guard !isSettingVolumeLocally else { return }
             // Only apply volume if player is initialized (mixer is ready)
             if isInitialized {
                 SpotifyPlayer.setVolume(volume)
@@ -86,9 +88,13 @@ final class PlaybackViewModel {
     private var isInitialized = false
     private var lastAlbumArtURL: String?
     private var playbackStateSubscription: AnyCancellable?
+    private var volumeSubscription: AnyCancellable?
+    /// Flag to prevent feedback loop when we set volume locally
+    private var isSettingVolumeLocally = false
 
     private init() {
         setupPlaybackStateSubscription()
+        setupVolumeSubscription()
         setupRemoteCommandCenter()
 
         // Load saved volume (but don't apply it yet - mixer isn't initialized)
@@ -485,6 +491,26 @@ final class PlaybackViewModel {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 self?.handlePlaybackStateUpdate(state)
+            }
+    }
+
+    /// Subscribe to remote volume changes from Spirc
+    /// This allows volume changes from other devices to update the local slider
+    private func setupVolumeSubscription() {
+        volumeSubscription = SpotifyPlayer.volumeChanged
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] volumeU16 in
+                guard let self else { return }
+                // Convert from 0-65535 to 0.0-1.0
+                let normalizedVolume = Double(volumeU16) / 65535.0
+                #if DEBUG
+                    print("[PlaybackViewModel] Remote volume change: \(volumeU16) -> \(normalizedVolume)")
+                #endif
+                // Set flag to prevent feedback loop
+                isSettingVolumeLocally = true
+                volume = normalizedVolume
+                isSettingVolumeLocally = false
+                saveVolume()
             }
     }
 

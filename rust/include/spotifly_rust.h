@@ -81,6 +81,14 @@ typedef void (*StateUpdateCallback)(void);
 /// This fires on track changes to signal Swift to fetch updated queue state.
 void spotifly_register_state_update_callback(StateUpdateCallback callback);
 
+/// Callback function type for volume change notifications.
+/// Receives the new volume (0-65535).
+typedef void (*VolumeCallback)(uint16_t volume);
+
+/// Registers a callback to receive volume change notifications.
+/// Called when the volume is changed remotely (e.g., from another Spotify Connect device).
+void spotifly_register_volume_callback(VolumeCallback callback);
+
 /// Skips to the next track in the queue.
 /// Returns 0 on success, -1 on error or if at end of queue.
 int32_t spotifly_next(void);

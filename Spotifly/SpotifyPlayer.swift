@@ -88,6 +88,9 @@ private nonisolated(unsafe) let queueSubject = CurrentValueSubject<QueueState?, 
 /// Global subject for playback state updates (nonisolated for C callback access)
 private nonisolated(unsafe) let playbackStateSubject = CurrentValueSubject<PlaybackState?, Never>(nil)
 
+/// Global subject for volume updates (nonisolated for C callback access)
+private nonisolated(unsafe) let volumeSubject = PassthroughSubject<UInt16, Never>()
+
 /// Token provider for fetching queue from Web API (set during initialize)
 private nonisolated(unsafe) var stateUpdateTokenProvider: (@Sendable () async -> String)?
 
@@ -110,6 +113,21 @@ private nonisolated func registerStateUpdateCallback() {
     spotifly_register_state_update_callback {
         handleStateUpdateCallback()
     }
+}
+
+/// Registers the volume callback with Rust (fires on remote volume changes)
+private nonisolated func registerVolumeCallback() {
+    spotifly_register_volume_callback { volume in
+        handleVolumeCallback(volume)
+    }
+}
+
+/// C callback for volume change notifications from Rust
+private nonisolated func handleVolumeCallback(_ volume: UInt16) {
+    #if DEBUG
+        print("[SpotifyPlayer] Volume callback: \(volume)")
+    #endif
+    volumeSubject.send(volume)
 }
 
 /// C callback for state update notifications from Rust
@@ -393,6 +411,7 @@ enum SpotifyPlayer {
         registerQueueCallback()
         registerPlaybackStateCallback()
         registerStateUpdateCallback()
+        registerVolumeCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
@@ -416,6 +435,12 @@ enum SpotifyPlayer {
     /// Returns a publisher for playback state updates.
     static var playbackState: AnyPublisher<PlaybackState?, Never> {
         playbackStateSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher for remote volume changes (0-65535).
+    /// Subscribe to this to update the UI when volume is changed from another device.
+    static var volumeChanged: AnyPublisher<UInt16, Never> {
+        volumeSubject.eraseToAnyPublisher()
     }
 
     /// Refreshes the queue from Spotify Web API.
