@@ -333,6 +333,10 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                         Some(PlayerEvent::Seeked { position_ms, .. }) => {
                             update_position(position_ms);
                         }
+                        Some(PlayerEvent::PositionCorrection { position_ms, .. }) => {
+                            debug_println!("[Spotifly] PositionCorrection event: {}ms", position_ms);
+                            update_position(position_ms);
+                        }
                         Some(PlayerEvent::Stopped { .. }) => {
                             IS_PLAYING.store(false, Ordering::SeqCst);
                             IS_ACTIVE_DEVICE.store(false, Ordering::SeqCst);
