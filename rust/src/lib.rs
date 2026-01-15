@@ -197,6 +197,10 @@ pub extern "C" fn spotifly_register_volume_callback(callback: extern "C" fn(u16)
 /// Returns 0 on success, -1 on error.
 #[no_mangle]
 pub extern "C" fn spotifly_init_player(access_token: *const c_char) -> i32 {
+    // Print RUST_LOG env var for debugging
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "(not set)".to_string());
+    debug_println!("[Spotifly-lib] RUST_LOG={}", rust_log);
+
     if access_token.is_null() {
         debug_println!("Player init error: access_token is null");
         return -1;
