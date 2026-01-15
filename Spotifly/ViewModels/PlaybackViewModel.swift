@@ -216,15 +216,9 @@ final class PlaybackViewModel {
         errorMessage = nil
 
         do {
-            // Use Web API to add to queue - this goes through Spotify's servers
-            // and syncs with Spirc via dealer for proper Connect state
-            try await SpotifyAPI.addToQueue(trackUri: trackUri, accessToken: accessToken)
-            // Small delay for Spotify's servers to process the queue addition
-            try? await Task.sleep(for: .milliseconds(500))
-            // Refresh queue from Web API since Mercury doesn't notify us of queue changes
-            await SpotifyPlayer.refreshQueue()
-            // Update now playing metadata (e.g., queue count) - position update skipped by default
-            updateNowPlayingInfo()
+            // Use Spirc to add to queue directly via librespot
+            try SpotifyPlayer.addToQueue(trackUri: trackUri)
+            // Queue update will come via Mercury callback
         } catch {
             errorMessage = error.localizedDescription
         }
