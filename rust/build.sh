@@ -19,7 +19,19 @@ fi
 PLATFORM_NAME="${PLATFORM_NAME:-macosx}"
 SDK_NAME="${SDK_NAME:-$PLATFORM_NAME}"
 
-echo "Building Spotifly Rust library for platform: $PLATFORM_NAME"
+# Determine build configuration from Xcode's CONFIGURATION variable
+# Default to Release if not set (e.g., when running build.sh manually)
+CONFIGURATION="${CONFIGURATION:-Release}"
+
+if [ "$CONFIGURATION" = "Debug" ]; then
+    CARGO_FLAGS=""
+    BUILD_TYPE="debug"
+    echo "Building Spotifly Rust library (DEBUG) for platform: $PLATFORM_NAME"
+else
+    CARGO_FLAGS="--release"
+    BUILD_TYPE="release"
+    echo "Building Spotifly Rust library (RELEASE) for platform: $PLATFORM_NAME"
+fi
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR/lib"
@@ -31,23 +43,23 @@ cd "$RUST_DIR"
 case "$PLATFORM_NAME" in
     macosx*)
         echo "Building for macOS (aarch64)..."
-        cargo build --release --target aarch64-apple-darwin
-        cp "$RUST_DIR/target/aarch64-apple-darwin/release/libspotifly_rust.a" "$OUTPUT_DIR/lib/"
+        cargo build $CARGO_FLAGS --target aarch64-apple-darwin
+        cp "$RUST_DIR/target/aarch64-apple-darwin/$BUILD_TYPE/libspotifly_rust.a" "$OUTPUT_DIR/lib/"
         ;;
     iphoneos*)
         echo "Building for iOS device (aarch64)..."
-        cargo build --release --target aarch64-apple-ios
-        cp "$RUST_DIR/target/aarch64-apple-ios/release/libspotifly_rust.a" "$OUTPUT_DIR/lib/"
+        cargo build $CARGO_FLAGS --target aarch64-apple-ios
+        cp "$RUST_DIR/target/aarch64-apple-ios/$BUILD_TYPE/libspotifly_rust.a" "$OUTPUT_DIR/lib/"
         ;;
     iphonesimulator*)
         echo "Building for iOS Simulator (aarch64)..."
-        cargo build --release --target aarch64-apple-ios-sim
-        cp "$RUST_DIR/target/aarch64-apple-ios-sim/release/libspotifly_rust.a" "$OUTPUT_DIR/lib/"
+        cargo build $CARGO_FLAGS --target aarch64-apple-ios-sim
+        cp "$RUST_DIR/target/aarch64-apple-ios-sim/$BUILD_TYPE/libspotifly_rust.a" "$OUTPUT_DIR/lib/"
         ;;
     *)
         echo "Unknown platform: $PLATFORM_NAME, defaulting to macOS"
-        cargo build --release --target aarch64-apple-darwin
-        cp "$RUST_DIR/target/aarch64-apple-darwin/release/libspotifly_rust.a" "$OUTPUT_DIR/lib/"
+        cargo build $CARGO_FLAGS --target aarch64-apple-darwin
+        cp "$RUST_DIR/target/aarch64-apple-darwin/$BUILD_TYPE/libspotifly_rust.a" "$OUTPUT_DIR/lib/"
         ;;
 esac
 
