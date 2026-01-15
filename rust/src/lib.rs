@@ -1,8 +1,12 @@
 /// Debug-only println! macro - compiles to nothing in release builds
+/// Includes ISO8601 timestamp with second precision
 macro_rules! debug_println {
     ($($arg:tt)*) => {
         #[cfg(debug_assertions)]
-        println!($($arg)*);
+        {
+            let ts = iso8601_timestamp::Timestamp::now_utc();
+            println!("[{}] {}", ts, format_args!($($arg)*));
+        }
     };
 }
 
@@ -507,6 +511,13 @@ const ERROR_NEEDS_REINIT: i32 = -2;
 
 fn send_playback_state(player_state: &PlayerState) {
     debug_println!("[Spotifly-lib] send_playback_state called");
+
+    // Log context URI - this is the "active playlist/album/artist" being played from
+    let context_uri = &player_state.context_uri;
+    if !context_uri.is_empty() {
+        debug_println!("[Spotifly-lib] Context URI: {}", context_uri);
+    }
+
     let cb_guard = PLAYBACK_STATE_CALLBACK.lock().unwrap();
     if let Some(callback) = *cb_guard {
         let cb = callback;
@@ -561,6 +572,12 @@ fn send_playback_state(player_state: &PlayerState) {
 
 fn process_and_send_queue(player_state: PlayerState) {
     debug_println!("[Spotifly-lib] process_and_send_queue called");
+
+    // Log context URI for queue processing too
+    if !player_state.context_uri.is_empty() {
+        debug_println!("[Spotifly-lib] Queue context URI: {}", player_state.context_uri);
+    }
+
     let cb_guard = QUEUE_CALLBACK.lock().unwrap();
     if let Some(callback) = *cb_guard {
         debug_println!("[Spotifly-lib] Callback is registered, processing queue");
