@@ -493,6 +493,18 @@ fn check_and_send_volume(volume: u32) {
     }
 }
 
+/// Checks if an error indicates the Spirc channel is closed (needs reinit)
+fn is_channel_closed_error(err: &librespot_core::Error) -> bool {
+    let err_string = format!("{:?}", err);
+    err_string.contains("channel closed")
+}
+
+/// Error codes:
+/// -1 = general error
+/// -2 = channel closed, needs reinit (call spotifly_init_player again)
+const ERROR_GENERAL: i32 = -1;
+const ERROR_NEEDS_REINIT: i32 = -2;
+
 fn send_playback_state(player_state: &PlayerState) {
     debug_println!("[Spotifly-lib] send_playback_state called");
     let cb_guard = PLAYBACK_STATE_CALLBACK.lock().unwrap();
@@ -778,7 +790,7 @@ pub extern "C" fn spotifly_play_uri(uri_or_url: *const c_char) -> i32 {
 }
 
 /// Pauses playback.
-/// Returns 0 on success, -1 on error.
+/// Returns 0 on success, -1 on error, -2 if channel closed (needs reinit).
 #[no_mangle]
 pub extern "C" fn spotifly_pause() -> i32 {
     debug_println!("[Spotifly-lib] spotifly_pause called");
@@ -790,21 +802,25 @@ pub extern "C" fn spotifly_pause() -> i32 {
                     IS_PLAYING.store(false, Ordering::SeqCst);
                     0
                 }
-                Err(_e) => {
-                    debug_println!("Pause error: {:?}", _e);
-                    -1
+                Err(e) => {
+                    debug_println!("Pause error: {:?}", e);
+                    if is_channel_closed_error(&e) {
+                        ERROR_NEEDS_REINIT
+                    } else {
+                        ERROR_GENERAL
+                    }
                 }
             }
         }
         None => {
             debug_println!("Pause error: Spirc not initialized");
-            -1
+            ERROR_GENERAL
         }
     }
 }
 
 /// Resumes playback.
-/// Returns 0 on success, -1 on error.
+/// Returns 0 on success, -1 on error, -2 if channel closed (needs reinit).
 #[no_mangle]
 pub extern "C" fn spotifly_resume() -> i32 {
     debug_println!("[Spotifly-lib] spotifly_resume called");
@@ -816,15 +832,19 @@ pub extern "C" fn spotifly_resume() -> i32 {
                     IS_PLAYING.store(true, Ordering::SeqCst);
                     0
                 }
-                Err(_e) => {
-                    debug_println!("Resume error: {:?}", _e);
-                    -1
+                Err(e) => {
+                    debug_println!("Resume error: {:?}", e);
+                    if is_channel_closed_error(&e) {
+                        ERROR_NEEDS_REINIT
+                    } else {
+                        ERROR_GENERAL
+                    }
                 }
             }
         }
         None => {
             debug_println!("Resume error: Spirc not initialized");
-            -1
+            ERROR_GENERAL
         }
     }
 }
@@ -895,7 +915,7 @@ pub extern "C" fn spotifly_get_position_ms() -> u32 {
 }
 
 /// Skips to the next track in the queue.
-/// Returns 0 on success, -1 on error or if at end of queue.
+/// Returns 0 on success, -1 on error, -2 if channel closed (needs reinit).
 #[no_mangle]
 pub extern "C" fn spotifly_next() -> i32 {
     debug_println!("[Spotifly-lib] spotifly_next called");
@@ -904,21 +924,25 @@ pub extern "C" fn spotifly_next() -> i32 {
         Some(spirc) => {
             match spirc.next() {
                 Ok(_) => 0,
-                Err(_e) => {
-                    debug_println!("Next error: {:?}", _e);
-                    -1
+                Err(e) => {
+                    debug_println!("Next error: {:?}", e);
+                    if is_channel_closed_error(&e) {
+                        ERROR_NEEDS_REINIT
+                    } else {
+                        ERROR_GENERAL
+                    }
                 }
             }
         }
         None => {
             debug_println!("Next error: Spirc not initialized");
-            -1
+            ERROR_GENERAL
         }
     }
 }
 
 /// Skips to the previous track in the queue.
-/// Returns 0 on success, -1 on error or if at start of queue.
+/// Returns 0 on success, -1 on error, -2 if channel closed (needs reinit).
 #[no_mangle]
 pub extern "C" fn spotifly_previous() -> i32 {
     debug_println!("[Spotifly-lib] spotifly_previous called");
@@ -927,21 +951,25 @@ pub extern "C" fn spotifly_previous() -> i32 {
         Some(spirc) => {
             match spirc.prev() {
                 Ok(_) => 0,
-                Err(_e) => {
-                    debug_println!("Previous error: {:?}", _e);
-                    -1
+                Err(e) => {
+                    debug_println!("Previous error: {:?}", e);
+                    if is_channel_closed_error(&e) {
+                        ERROR_NEEDS_REINIT
+                    } else {
+                        ERROR_GENERAL
+                    }
                 }
             }
         }
         None => {
             debug_println!("Previous error: Spirc not initialized");
-            -1
+            ERROR_GENERAL
         }
     }
 }
 
 /// Seeks to the given position in milliseconds.
-/// Returns 0 on success, -1 on error.
+/// Returns 0 on success, -1 on error, -2 if channel closed (needs reinit).
 #[no_mangle]
 pub extern "C" fn spotifly_seek(position_ms: u32) -> i32 {
     debug_println!("[Spotifly-lib] spotifly_seek called: {}ms", position_ms);
@@ -950,15 +978,19 @@ pub extern "C" fn spotifly_seek(position_ms: u32) -> i32 {
         Some(spirc) => {
             match spirc.set_position_ms(position_ms) {
                 Ok(_) => 0,
-                Err(_e) => {
-                    debug_println!("Seek error: {:?}", _e);
-                    -1
+                Err(e) => {
+                    debug_println!("Seek error: {:?}", e);
+                    if is_channel_closed_error(&e) {
+                        ERROR_NEEDS_REINIT
+                    } else {
+                        ERROR_GENERAL
+                    }
                 }
             }
         }
         None => {
             debug_println!("Seek error: Spirc not initialized");
-            -1
+            ERROR_GENERAL
         }
     }
 }
@@ -1055,7 +1087,7 @@ pub extern "C" fn spotifly_play_radio(track_uri: *const c_char) -> i32 {
 }
 
 /// Sets the playback volume (0-65535).
-/// Returns 0 on success, -1 on error.
+/// Returns 0 on success, -1 on error, -2 if channel closed (needs reinit).
 #[no_mangle]
 pub extern "C" fn spotifly_set_volume(volume: u16) -> i32 {
     debug_println!("[Spotifly-lib] spotifly_set_volume called: {}", volume);
@@ -1064,15 +1096,19 @@ pub extern "C" fn spotifly_set_volume(volume: u16) -> i32 {
         Some(spirc) => {
             match spirc.set_volume(volume) {
                 Ok(_) => 0,
-                Err(_e) => {
-                    debug_println!("Set volume error: {:?}", _e);
-                    -1
+                Err(e) => {
+                    debug_println!("Set volume error: {:?}", e);
+                    if is_channel_closed_error(&e) {
+                        ERROR_NEEDS_REINIT
+                    } else {
+                        ERROR_GENERAL
+                    }
                 }
             }
         }
         None => {
             debug_println!("Set volume error: Spirc not initialized");
-            -1
+            ERROR_GENERAL
         }
     }
 }

@@ -12,6 +12,19 @@ extern "C" {
 void spotifly_free_string(char* s);
 
 // ============================================================================
+// Error codes
+// ============================================================================
+//
+// Most functions return:
+//   0  = success
+//  -1  = general error
+//  -2  = session disconnected, needs reinitialization
+//        (call spotifly_init_player again with a fresh token)
+//
+// When you receive -2, the Spirc channel has closed (e.g., due to idle timeout).
+// Get a fresh access token and call spotifly_init_player() to reconnect.
+
+// ============================================================================
 // Playback functions
 // ============================================================================
 
@@ -32,11 +45,11 @@ int32_t spotifly_play_tracks(const char* track_uris_json);
 int32_t spotifly_play_uri(const char* uri_or_url);
 
 /// Pauses playback.
-/// Returns 0 on success, -1 on error.
+/// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_pause(void);
 
 /// Resumes playback.
-/// Returns 0 on success, -1 on error.
+/// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_resume(void);
 
 /// Stops playback completely.
@@ -90,15 +103,15 @@ typedef void (*VolumeCallback)(uint16_t volume);
 void spotifly_register_volume_callback(VolumeCallback callback);
 
 /// Skips to the next track in the queue.
-/// Returns 0 on success, -1 on error or if at end of queue.
+/// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_next(void);
 
 /// Skips to the previous track in the queue.
-/// Returns 0 on success, -1 on error or if at start of queue.
+/// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_previous(void);
 
 /// Seeks to the given position in milliseconds.
-/// Returns 0 on success, -1 on error.
+/// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_seek(uint32_t position_ms);
 
 /// Plays radio for a seed track.
@@ -109,7 +122,7 @@ int32_t spotifly_seek(uint32_t position_ms);
 int32_t spotifly_play_radio(const char* track_uri);
 
 /// Sets the playback volume (0-65535).
-/// Returns 0 on success, -1 on error.
+/// Returns 0 on success, -1 on error, -2 if session disconnected.
 ///
 /// @param volume Volume level (0 = muted, 65535 = max)
 int32_t spotifly_set_volume(uint16_t volume);

@@ -89,12 +89,16 @@ final class PlaybackViewModel {
     private var lastAlbumArtURL: String?
     private var playbackStateSubscription: AnyCancellable?
     private var volumeSubscription: AnyCancellable?
+    private var sessionDisconnectedSubscription: AnyCancellable?
     /// Flag to prevent feedback loop when we set volume locally
     private var isSettingVolumeLocally = false
+    /// Token provider for reinitialization after session disconnect
+    private var tokenProvider: (@Sendable () async -> String)?
 
     private init() {
         setupPlaybackStateSubscription()
         setupVolumeSubscription()
+        setupSessionDisconnectedSubscription()
         setupRemoteCommandCenter()
 
         // Load saved volume (but don't apply it yet - mixer isn't initialized)
@@ -112,6 +116,11 @@ final class PlaybackViewModel {
 
         // Start position update timer
         startPositionTimer()
+    }
+
+    /// Sets the token provider for automatic reinitialization after session disconnect.
+    func setTokenProvider(_ provider: @escaping @Sendable () async -> String) {
+        tokenProvider = provider
     }
 
     func initializeIfNeeded(accessToken: String) async {
@@ -511,6 +520,31 @@ final class PlaybackViewModel {
                 volume = normalizedVolume
                 isSettingVolumeLocally = false
                 saveVolume()
+            }
+    }
+
+    /// Subscribe to session disconnection events from Spirc
+    /// Automatically reinitializes the player with a fresh token when the channel closes
+    private func setupSessionDisconnectedSubscription() {
+        sessionDisconnectedSubscription = SpotifyPlayer.sessionDisconnected
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self else { return }
+                #if DEBUG
+                    print("[PlaybackViewModel] Session disconnected - reinitializing player")
+                #endif
+
+                // Mark as not initialized so next action reinitializes
+                isInitialized = false
+                isPlaying = false
+
+                // If we have a token provider, reinitialize automatically
+                if let tokenProvider {
+                    Task { @MainActor in
+                        let token = await tokenProvider()
+                        await self.initializeIfNeeded(accessToken: token)
+                    }
+                }
             }
     }
 

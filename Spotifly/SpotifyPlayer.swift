@@ -380,6 +380,7 @@ enum SpotifyPlayerError: Error, LocalizedError, Sendable {
     case playbackFailed
     case notInitialized
     case queueFetchFailed
+    case sessionDisconnected
 
     var errorDescription: String? {
         switch self {
@@ -391,9 +392,17 @@ enum SpotifyPlayerError: Error, LocalizedError, Sendable {
             "Player not initialized"
         case .queueFetchFailed:
             "Failed to fetch queue"
+        case .sessionDisconnected:
+            "Session disconnected, needs reinitialization"
         }
     }
 }
+
+/// Global subject for session disconnection (needs reinit)
+private nonisolated(unsafe) let sessionDisconnectedSubject = PassthroughSubject<Void, Never>()
+
+/// Error code returned by Rust when session is disconnected
+private let errorNeedsReinit: Int32 = -2
 
 /// Swift wrapper for the Rust librespot playback functionality
 enum SpotifyPlayer {
@@ -441,6 +450,12 @@ enum SpotifyPlayer {
     /// Subscribe to this to update the UI when volume is changed from another device.
     static var volumeChanged: AnyPublisher<UInt16, Never> {
         volumeSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher that emits when the session is disconnected and needs reinitialization.
+    /// Subscribe to this to trigger automatic reconnection with a fresh token.
+    static var sessionDisconnected: AnyPublisher<Void, Never> {
+        sessionDisconnectedSubject.eraseToAnyPublisher()
     }
 
     /// Refreshes the queue from Spotify Web API.
@@ -513,13 +528,21 @@ enum SpotifyPlayer {
     }
 
     /// Pauses playback.
+    /// Emits on `sessionDisconnected` if the session needs reinitialization.
     static func pause() {
-        spotifly_pause()
+        let result = spotifly_pause()
+        if result == errorNeedsReinit {
+            sessionDisconnectedSubject.send()
+        }
     }
 
     /// Resumes playback.
+    /// Emits on `sessionDisconnected` if the session needs reinitialization.
     static func resume() {
-        spotifly_resume()
+        let result = spotifly_resume()
+        if result == errorNeedsReinit {
+            sessionDisconnectedSubject.send()
+        }
     }
 
     /// Stops playback.
@@ -550,33 +573,49 @@ enum SpotifyPlayer {
     }
 
     /// Skips to the next track in the queue.
+    /// Throws `sessionDisconnected` if the session needs reinitialization.
     static func next() throws {
         let result = spotifly_next()
+        if result == errorNeedsReinit {
+            throw SpotifyPlayerError.sessionDisconnected
+        }
         guard result == 0 else {
             throw SpotifyPlayerError.playbackFailed
         }
     }
 
     /// Skips to the previous track in the queue.
+    /// Throws `sessionDisconnected` if the session needs reinitialization.
     static func previous() throws {
         let result = spotifly_previous()
+        if result == errorNeedsReinit {
+            throw SpotifyPlayerError.sessionDisconnected
+        }
         guard result == 0 else {
             throw SpotifyPlayerError.playbackFailed
         }
     }
 
     /// Seeks to the given position in milliseconds.
+    /// Throws `sessionDisconnected` if the session needs reinitialization.
     static func seek(positionMs: UInt32) throws {
         let result = spotifly_seek(positionMs)
+        if result == errorNeedsReinit {
+            throw SpotifyPlayerError.sessionDisconnected
+        }
         guard result == 0 else {
             throw SpotifyPlayerError.playbackFailed
         }
     }
 
     /// Sets the playback volume (0.0 - 1.0).
+    /// Emits on `sessionDisconnected` if the session needs reinitialization.
     static func setVolume(_ volume: Double) {
         let volumeU16 = UInt16(max(0, min(1, volume)) * 65535.0)
-        spotifly_set_volume(volumeU16)
+        let result = spotifly_set_volume(volumeU16)
+        if result == errorNeedsReinit {
+            sessionDisconnectedSubject.send()
+        }
     }
 
     /// Plays radio for a seed track.
