@@ -150,6 +150,12 @@ void spotifly_set_gapless(bool enabled);
 /// Gets the current gapless playback setting.
 bool spotifly_get_gapless(void);
 
+/// Sets the initial volume (0-65535) used when registering with Spotify Connect.
+/// Must be called before spotifly_init_player() to take effect.
+///
+/// @param volume Initial volume level (0 = muted, 65535 = max)
+void spotifly_set_initial_volume(uint16_t volume);
+
 #ifdef __cplusplus
 }
 #endif

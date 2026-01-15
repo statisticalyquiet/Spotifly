@@ -453,10 +453,14 @@ enum SpotifyPlayer {
     private nonisolated static func syncSettingsFromUserDefaults() {
         let bitrateRawValue = UserDefaults.standard.object(forKey: "streamingBitrate") as? Int ?? 1
         let gaplessEnabled = UserDefaults.standard.object(forKey: "gaplessPlayback") as? Bool ?? true
+        let savedVolume = UserDefaults.standard.double(forKey: "playbackVolume")
+        // Convert 0.0-1.0 to 0-65535, default to 50% if not set
+        let volumeU16 = savedVolume > 0 ? UInt16(savedVolume * 65535.0) : 65535 / 2
 
         // Call FFI directly to avoid actor isolation issues
         spotifly_set_bitrate(UInt8(min(max(bitrateRawValue, 0), 2)))
         spotifly_set_gapless(gaplessEnabled)
+        spotifly_set_initial_volume(volumeU16)
     }
 
     /// Plays content by its Spotify URI or URL.

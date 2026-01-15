@@ -62,6 +62,8 @@ static POSITION_TIMESTAMP_MS: AtomicU64 = AtomicU64::new(0);
 static BITRATE_SETTING: AtomicU8 = AtomicU8::new(1);
 // Gapless playback: true by default (matches librespot default)
 static GAPLESS_SETTING: AtomicBool = AtomicBool::new(true);
+// Initial volume (0-65535), default 50%
+static INITIAL_VOLUME_SETTING: AtomicU16 = AtomicU16::new(65535 / 2);
 
 #[derive(Serialize)]
 struct QueueItem {
@@ -426,10 +428,12 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
 
     // Create Spirc for Spotify Connect support (makes this app appear as a Connect device)
     // Spirc::new() will connect the session - this is the proper way per librespot examples
+    let initial_volume = INITIAL_VOLUME_SETTING.load(Ordering::SeqCst);
+    debug_println!("[Spotifly] Using initial volume: {}", initial_volume);
     let connect_config = ConnectConfig {
         name: "Spotifly".to_string(),
         device_type: DeviceType::Computer,
-        initial_volume: 65535 / 2, // 50% volume
+        initial_volume,
         ..Default::default()
     };
 
@@ -1103,6 +1107,13 @@ pub extern "C" fn spotifly_set_gapless(enabled: bool) {
 #[no_mangle]
 pub extern "C" fn spotifly_get_gapless() -> bool {
     GAPLESS_SETTING.load(Ordering::SeqCst)
+}
+
+/// Sets the initial volume (0-65535) used when registering with Spotify Connect.
+/// Must be called before spotifly_init_player() to take effect.
+#[no_mangle]
+pub extern "C" fn spotifly_set_initial_volume(volume: u16) {
+    INITIAL_VOLUME_SETTING.store(volume, Ordering::SeqCst);
 }
 
 /// Transfers playback from another device to this local player.
