@@ -19,7 +19,6 @@ protobuf = "3"
 serde = { version = "1.0", features = ["derive"] }
 tokio-stream = "0.1"
 futures-util = "0.3"
-iso8601-timestamp = "0.4"
 env_logger = "0.11"
 log = "0.4"
 

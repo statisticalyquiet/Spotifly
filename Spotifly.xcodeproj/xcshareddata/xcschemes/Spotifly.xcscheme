@@ -77,7 +77,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "RUST_LOG"
-            value = "librespot=trace"
+            value = "librespot=trace,spotifly_rust=debug"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
