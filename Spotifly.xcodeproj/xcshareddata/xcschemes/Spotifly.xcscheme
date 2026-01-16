@@ -77,7 +77,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "RUST_LOG"
-            value = "librespot_connect::spirc=trace"
+            value = "librespot=trace"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
