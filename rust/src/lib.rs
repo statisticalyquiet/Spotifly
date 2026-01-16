@@ -49,6 +49,8 @@ static STATE_UPDATE_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> = Lazy::new(|
 static VOLUME_CALLBACK: Lazy<Mutex<Option<extern "C" fn(u16)>>> = Lazy::new(|| Mutex::new(None));
 static LOADING_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
+static QUEUE_CHANGED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
+    Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Position tracking - updated from player events
@@ -96,6 +98,11 @@ struct PlaybackStateUpdate {
 struct LoadingNotification {
     track_uri: String,
     position_ms: u32,
+}
+
+#[derive(Serialize)]
+struct QueueChangedNotification {
+    track_uri: String,
 }
 
 /// Get current timestamp in milliseconds since UNIX epoch
@@ -205,6 +212,15 @@ pub extern "C" fn spotifly_register_volume_callback(callback: extern "C" fn(u16)
 #[no_mangle]
 pub extern "C" fn spotifly_register_loading_callback(callback: extern "C" fn(*const c_char)) {
     let mut cb = LOADING_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Registers a callback to receive queue change notifications.
+/// Called when a remote device adds a track to the queue.
+/// The callback receives JSON with track_uri.
+#[no_mangle]
+pub extern "C" fn spotifly_register_queue_changed_callback(callback: extern "C" fn(*const c_char)) {
+    let mut cb = QUEUE_CHANGED_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
 
@@ -401,6 +417,19 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                     track_uri: track_id.to_string(),
                                     position_ms,
                                 };
+                                if let Ok(json) = serde_json::to_string(&notification) {
+                                    let c_str = CString::new(json).unwrap();
+                                    cb(c_str.as_ptr());
+                                }
+                            }
+                        }
+                        Some(PlayerEvent::QueueChanged { track_uri }) => {
+                            debug!("QueueChanged event: {}", track_uri);
+                            let cb_guard = QUEUE_CHANGED_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                let notification = QueueChangedNotification { track_uri };
                                 if let Ok(json) = serde_json::to_string(&notification) {
                                     let c_str = CString::new(json).unwrap();
                                     cb(c_str.as_ptr());
@@ -1346,7 +1375,7 @@ pub extern "C" fn spotifly_is_spirc_ready() -> i32 {
 #[no_mangle]
 pub extern "C" fn spotifly_add_to_queue(track_uri: *const c_char) -> i32 {
     if track_uri.is_null() {
-        debug_println!("Add to queue error: track_uri is null");
+        debug!("Add to queue error: track_uri is null");
         return -1;
     }
 
@@ -1354,30 +1383,30 @@ pub extern "C" fn spotifly_add_to_queue(track_uri: *const c_char) -> i32 {
         match CStr::from_ptr(track_uri).to_str() {
             Ok(s) => s.to_string(),
             Err(_) => {
-                debug_println!("Add to queue error: invalid track_uri string");
+                debug!("Add to queue error: invalid track_uri string");
                 return -1;
             }
         }
     };
 
-    debug_println!("[Spotifly] spotifly_add_to_queue called: {}", uri_str);
+    debug!("[Spotifly] spotifly_add_to_queue called: {}", uri_str);
 
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => {
             match spirc.add_to_queue(uri_str) {
                 Ok(_) => {
-                    debug_println!("[Spotifly] add_to_queue succeeded");
+                    debug!("[Spotifly] add_to_queue succeeded");
                     0
                 }
-                Err(_e) => {
-                    debug_println!("Add to queue error: {:?}", e);
+                Err(e) => {
+                    debug!("Add to queue error: {:?}", e);
                     -1
                 }
             }
         }
         None => {
-            debug_println!("Add to queue error: Spirc not initialized");
+            debug!("Add to queue error: Spirc not initialized");
             -1
         }
     }

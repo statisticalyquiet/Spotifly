@@ -100,6 +100,14 @@ struct LoadingNotification: Sendable {
 /// Global subject for loading notifications (nonisolated for C callback access)
 private nonisolated(unsafe) let loadingSubject = PassthroughSubject<LoadingNotification, Never>()
 
+/// Queue changed notification containing the track URI that was added
+struct QueueChangedNotification: Sendable {
+    nonisolated let trackUri: String
+}
+
+/// Global subject for queue changed notifications (nonisolated for C callback access)
+private nonisolated(unsafe) let queueChangedSubject = PassthroughSubject<QueueChangedNotification, Never>()
+
 /// Token provider for fetching queue from Web API (set during initialize)
 private nonisolated(unsafe) var stateUpdateTokenProvider: (@Sendable () async -> String)?
 
@@ -178,6 +186,54 @@ private nonisolated func handleLoadingCallback(_ jsonPtr: UnsafePointer<CChar>?)
     } catch {
         #if DEBUG
             print("[SpotifyPlayer] Failed to parse loading JSON: \(error)")
+        #endif
+    }
+}
+
+/// Registers the queue changed callback with Rust (fires when remote device adds to queue)
+private nonisolated func registerQueueChangedCallback() {
+    spotifly_register_queue_changed_callback { jsonPtr in
+        handleQueueChangedCallback(jsonPtr)
+    }
+}
+
+/// C callback for queue changed notifications from Rust
+/// Fires when a remote device adds a track to the queue
+private nonisolated func handleQueueChangedCallback(_ jsonPtr: UnsafePointer<CChar>?) {
+    guard let jsonPtr else {
+        #if DEBUG
+            print("[SpotifyPlayer] handleQueueChangedCallback: jsonPtr is nil")
+        #endif
+        return
+    }
+
+    let jsonString = String(cString: jsonPtr)
+    #if DEBUG
+        print("[SpotifyPlayer] Queue changed callback: \(jsonString)")
+    #endif
+
+    guard let data = jsonString.data(using: .utf8) else {
+        return
+    }
+
+    do {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        let trackUri = json["track_uri"] as? String ?? ""
+        let notification = QueueChangedNotification(trackUri: trackUri)
+        queueChangedSubject.send(notification)
+
+        // Refresh queue from Web API to update the UI
+        // Add a small delay to let Spotify's servers process the queue change
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            await fetchAndEmitQueueState()
+        }
+    } catch {
+        #if DEBUG
+            print("[SpotifyPlayer] Failed to parse queue changed JSON: \(error)")
         #endif
     }
 }
@@ -474,6 +530,7 @@ enum SpotifyPlayer {
         registerStateUpdateCallback()
         registerVolumeCallback()
         registerLoadingCallback()
+        registerQueueChangedCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
@@ -510,6 +567,12 @@ enum SpotifyPlayer {
     /// Use this for faster Now Playing updates when playing from remote devices.
     static var loading: AnyPublisher<LoadingNotification, Never> {
         loadingSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher for queue changed notifications.
+    /// Fires when a remote device adds a track to the queue.
+    static var queueChanged: AnyPublisher<QueueChangedNotification, Never> {
+        queueChangedSubject.eraseToAnyPublisher()
     }
 
     /// Returns a publisher that emits when the session is disconnected and needs reinitialization.

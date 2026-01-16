@@ -111,6 +111,14 @@ typedef void (*LoadingCallback)(const char* loading_json);
 /// Called when a new track starts loading (before metadata is fetched).
 void spotifly_register_loading_callback(LoadingCallback callback);
 
+/// Callback function type for queue change notifications.
+/// Receives a JSON string containing track_uri of the added track.
+typedef void (*QueueChangedCallback)(const char* queue_changed_json);
+
+/// Registers a callback to receive queue change notifications.
+/// Called when a remote device adds a track to the queue.
+void spotifly_register_queue_changed_callback(QueueChangedCallback callback);
+
 /// Skips to the next track in the queue.
 /// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_next(void);
