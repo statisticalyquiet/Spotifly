@@ -51,6 +51,8 @@ static LOADING_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
 static QUEUE_CHANGED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
+static SESSION_DISCONNECTED_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
+    Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Position tracking - updated from player events
@@ -221,6 +223,15 @@ pub extern "C" fn spotifly_register_loading_callback(callback: extern "C" fn(*co
 #[no_mangle]
 pub extern "C" fn spotifly_register_queue_changed_callback(callback: extern "C" fn(*const c_char)) {
     let mut cb = QUEUE_CHANGED_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Registers a callback to receive session disconnection notifications.
+/// Called when the Spotify session is disconnected (e.g., idle timeout).
+/// When this fires, you should reinitialize the player with a fresh token.
+#[no_mangle]
+pub extern "C" fn spotifly_register_session_disconnected_callback(callback: extern "C" fn()) {
+    let mut cb = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
 
@@ -434,6 +445,15 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                     let c_str = CString::new(json).unwrap();
                                     cb(c_str.as_ptr());
                                 }
+                            }
+                        }
+                        Some(PlayerEvent::SessionDisconnected { connection_id, user_name }) => {
+                            debug!("SessionDisconnected event: connection_id={}, user={}", connection_id, user_name);
+                            let cb_guard = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                cb();
                             }
                         }
                         None => break,
@@ -979,6 +999,62 @@ pub extern "C" fn spotifly_shutdown() -> i32 {
         }
     }
     -1
+}
+
+/// Cleans up all player state, allowing a fresh reinitialization.
+/// Call this before spotifly_init_player() when the session has disconnected.
+/// This clears all static state (session, player, spirc, etc.)
+#[no_mangle]
+pub extern "C" fn spotifly_cleanup() {
+    debug!("spotifly_cleanup called - clearing all state");
+
+    // Signal event listener to stop
+    {
+        let mut tx_guard = PLAYER_EVENT_TX.lock().unwrap();
+        if let Some(tx) = tx_guard.take() {
+            let _ = tx.send(());
+        }
+    }
+
+    // Clear Spirc first (it holds references to player and session)
+    {
+        let mut spirc_guard = SPIRC.lock().unwrap();
+        *spirc_guard = None;
+    }
+    SPIRC_READY.store(false, Ordering::SeqCst);
+
+    // Clear player
+    {
+        let mut player_guard = PLAYER.lock().unwrap();
+        *player_guard = None;
+    }
+
+    // Clear mixer
+    {
+        let mut mixer_guard = MIXER.lock().unwrap();
+        *mixer_guard = None;
+    }
+
+    // Clear session
+    {
+        let mut session_guard = SESSION.lock().unwrap();
+        *session_guard = None;
+    }
+
+    // Clear device ID
+    {
+        let mut device_id_guard = DEVICE_ID.lock().unwrap();
+        *device_id_guard = None;
+    }
+
+    // Reset state flags
+    IS_PLAYING.store(false, Ordering::SeqCst);
+    IS_ACTIVE_DEVICE.store(false, Ordering::SeqCst);
+    POSITION_MS.store(0, Ordering::SeqCst);
+    POSITION_TIMESTAMP_MS.store(0, Ordering::SeqCst);
+    LAST_VOLUME.store(0, Ordering::SeqCst);
+
+    debug!("spotifly_cleanup complete - ready for reinitialization");
 }
 
 /// Returns 1 if currently playing, 0 otherwise.

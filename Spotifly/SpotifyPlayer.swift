@@ -238,6 +238,22 @@ private nonisolated func handleQueueChangedCallback(_ jsonPtr: UnsafePointer<CCh
     }
 }
 
+/// Registers the session disconnected callback with Rust (fires when dealer connection closes)
+private nonisolated func registerSessionDisconnectedCallback() {
+    spotifly_register_session_disconnected_callback {
+        handleSessionDisconnectedCallback()
+    }
+}
+
+/// C callback for session disconnection notifications from Rust
+/// Fires when the Spotify session disconnects (e.g., idle timeout)
+private nonisolated func handleSessionDisconnectedCallback() {
+    #if DEBUG
+        print("[SpotifyPlayer] Session disconnected event received - triggering reinit")
+    #endif
+    sessionDisconnectedSubject.send()
+}
+
 /// C callback for state update notifications from Rust
 /// Triggers a Web API fetch to get the current queue state
 private nonisolated func handleStateUpdateCallback() {
@@ -544,9 +560,16 @@ enum SpotifyPlayer {
         registerVolumeCallback()
         registerLoadingCallback()
         registerQueueChangedCallback()
+        registerSessionDisconnectedCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
+
+        // Clean up any previous session state before initializing
+        // This is necessary because Session instances cannot be reused after disconnection
+        await Task.detached {
+            spotifly_cleanup()
+        }.value
 
         let result = await Task.detached {
             accessToken.withCString { tokenPtr in

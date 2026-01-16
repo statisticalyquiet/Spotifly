@@ -61,6 +61,11 @@ int32_t spotifly_stop(void);
 /// Returns 0 on success, -1 on error.
 int32_t spotifly_shutdown(void);
 
+/// Cleans up all player state, allowing a fresh reinitialization.
+/// Call this before spotifly_init_player() when the session has disconnected.
+/// This clears all static state (session, player, spirc, etc.)
+void spotifly_cleanup(void);
+
 /// Returns 1 if currently playing, 0 otherwise.
 int32_t spotifly_is_playing(void);
 
@@ -118,6 +123,14 @@ typedef void (*QueueChangedCallback)(const char* queue_changed_json);
 /// Registers a callback to receive queue change notifications.
 /// Called when a remote device adds a track to the queue.
 void spotifly_register_queue_changed_callback(QueueChangedCallback callback);
+
+/// Callback function type for session disconnection notifications.
+typedef void (*SessionDisconnectedCallback)(void);
+
+/// Registers a callback to receive session disconnection notifications.
+/// Called when the Spotify session is disconnected (e.g., idle timeout).
+/// When this fires, reinitialize the player with a fresh token.
+void spotifly_register_session_disconnected_callback(SessionDisconnectedCallback callback);
 
 /// Skips to the next track in the queue.
 /// Returns 0 on success, -1 on error, -2 if session disconnected.
