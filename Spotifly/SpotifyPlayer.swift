@@ -91,6 +91,15 @@ private nonisolated(unsafe) let playbackStateSubject = CurrentValueSubject<Playb
 /// Global subject for volume updates (nonisolated for C callback access)
 private nonisolated(unsafe) let volumeSubject = PassthroughSubject<UInt16, Never>()
 
+/// Loading notification containing track URI and position (fires early, before metadata is fetched)
+struct LoadingNotification: Sendable {
+    nonisolated let trackUri: String
+    nonisolated let positionMs: UInt32
+}
+
+/// Global subject for loading notifications (nonisolated for C callback access)
+private nonisolated(unsafe) let loadingSubject = PassthroughSubject<LoadingNotification, Never>()
+
 /// Token provider for fetching queue from Web API (set during initialize)
 private nonisolated(unsafe) var stateUpdateTokenProvider: (@Sendable () async -> String)?
 
@@ -128,6 +137,49 @@ private nonisolated func handleVolumeCallback(_ volume: UInt16) {
         print("[SpotifyPlayer] Volume callback: \(volume)")
     #endif
     volumeSubject.send(volume)
+}
+
+/// Registers the loading callback with Rust (fires when a track starts loading)
+private nonisolated func registerLoadingCallback() {
+    spotifly_register_loading_callback { jsonPtr in
+        handleLoadingCallback(jsonPtr)
+    }
+}
+
+/// C callback for loading notifications from Rust
+/// Fires earlier than TrackChanged (~180ms vs ~620ms after remote command)
+private nonisolated func handleLoadingCallback(_ jsonPtr: UnsafePointer<CChar>?) {
+    guard let jsonPtr else {
+        #if DEBUG
+            print("[SpotifyPlayer] handleLoadingCallback: jsonPtr is nil")
+        #endif
+        return
+    }
+
+    let jsonString = String(cString: jsonPtr)
+    #if DEBUG
+        print("[SpotifyPlayer] Loading callback: \(jsonString)")
+    #endif
+
+    guard let data = jsonString.data(using: .utf8) else {
+        return
+    }
+
+    do {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        let trackUri = json["track_uri"] as? String ?? ""
+        let positionMs = (json["position_ms"] as? NSNumber)?.uint32Value ?? 0
+
+        let notification = LoadingNotification(trackUri: trackUri, positionMs: positionMs)
+        loadingSubject.send(notification)
+    } catch {
+        #if DEBUG
+            print("[SpotifyPlayer] Failed to parse loading JSON: \(error)")
+        #endif
+    }
 }
 
 /// C callback for state update notifications from Rust
@@ -421,6 +473,7 @@ enum SpotifyPlayer {
         registerPlaybackStateCallback()
         registerStateUpdateCallback()
         registerVolumeCallback()
+        registerLoadingCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
@@ -450,6 +503,13 @@ enum SpotifyPlayer {
     /// Subscribe to this to update the UI when volume is changed from another device.
     static var volumeChanged: AnyPublisher<UInt16, Never> {
         volumeSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher for loading notifications.
+    /// Fires early (~180ms) when a track starts loading, before metadata is fetched.
+    /// Use this for faster Now Playing updates when playing from remote devices.
+    static var loading: AnyPublisher<LoadingNotification, Never> {
+        loadingSubject.eraseToAnyPublisher()
     }
 
     /// Returns a publisher that emits when the session is disconnected and needs reinitialization.

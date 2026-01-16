@@ -102,6 +102,15 @@ typedef void (*VolumeCallback)(uint16_t volume);
 /// Called when the volume is changed remotely (e.g., from another Spotify Connect device).
 void spotifly_register_volume_callback(VolumeCallback callback);
 
+/// Callback function type for loading notifications.
+/// Receives a JSON string containing track_uri and position_ms.
+/// This fires earlier than TrackChanged (~180ms vs ~620ms after remote command).
+typedef void (*LoadingCallback)(const char* loading_json);
+
+/// Registers a callback to receive loading notifications.
+/// Called when a new track starts loading (before metadata is fetched).
+void spotifly_register_loading_callback(LoadingCallback callback);
+
 /// Skips to the next track in the queue.
 /// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_next(void);

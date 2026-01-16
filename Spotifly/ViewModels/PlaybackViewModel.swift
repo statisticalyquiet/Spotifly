@@ -90,6 +90,7 @@ final class PlaybackViewModel {
     private var playbackStateSubscription: AnyCancellable?
     private var volumeSubscription: AnyCancellable?
     private var sessionDisconnectedSubscription: AnyCancellable?
+    private var loadingSubscription: AnyCancellable?
     /// Flag to prevent feedback loop when we set volume locally
     private var isSettingVolumeLocally = false
     /// Token provider for reinitialization after session disconnect
@@ -99,6 +100,7 @@ final class PlaybackViewModel {
         setupPlaybackStateSubscription()
         setupVolumeSubscription()
         setupSessionDisconnectedSubscription()
+        setupLoadingSubscription()
         setupRemoteCommandCenter()
 
         // Load saved volume (but don't apply it yet - mixer isn't initialized)
@@ -544,6 +546,27 @@ final class PlaybackViewModel {
                         let token = await tokenProvider()
                         await self.initializeIfNeeded(accessToken: token)
                     }
+                }
+            }
+    }
+
+    /// Subscribe to loading notifications from Spirc
+    /// This fires early (~180ms) when a track starts loading, before metadata is fetched
+    /// Allows faster Now Playing updates when playing from remote devices
+    private func setupLoadingSubscription() {
+        loadingSubscription = SpotifyPlayer.loading
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self else { return }
+                #if DEBUG
+                    print("[PlaybackViewModel] Loading notification: \(notification.trackUri) at \(notification.positionMs)ms")
+                #endif
+
+                // Update current track URI immediately for faster Now Playing updates
+                if !notification.trackUri.isEmpty, notification.trackUri != currentTrackUri {
+                    currentTrackUri = notification.trackUri
+                    // Mark as playing since we're loading a new track
+                    isPlaying = true
                 }
             }
     }

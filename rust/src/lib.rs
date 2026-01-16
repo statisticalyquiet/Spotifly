@@ -1,11 +1,10 @@
 use futures_util::StreamExt;
-use log::debug;
 use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, Spirc};
-use librespot_core::SessionConfig;
-use librespot_core::SpotifyUri;
 use librespot_core::cache::Cache;
 use librespot_core::config::DeviceType;
 use librespot_core::session::Session;
+use librespot_core::SessionConfig;
+use librespot_core::SpotifyUri;
 use librespot_playback::audio_backend;
 use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
 use librespot_playback::mixer::softmixer::SoftMixer;
@@ -13,10 +12,11 @@ use librespot_playback::mixer::{Mixer, MixerConfig};
 use librespot_playback::player::{Player, PlayerEvent};
 use librespot_protocol::connect::ClusterUpdate;
 use librespot_protocol::player::PlayerState;
+use log::debug;
 use once_cell::sync::Lazy;
 use serde::Serialize;
-use std::ffi::{CStr, CString, c_char};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
+use std::ffi::{c_char, CStr, CString};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime;
@@ -47,6 +47,8 @@ static PLAYBACK_STATE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>
     Lazy::new(|| Mutex::new(None));
 static STATE_UPDATE_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> = Lazy::new(|| Mutex::new(None));
 static VOLUME_CALLBACK: Lazy<Mutex<Option<extern "C" fn(u16)>>> = Lazy::new(|| Mutex::new(None));
+static LOADING_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
+    Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Position tracking - updated from player events
@@ -88,6 +90,12 @@ struct PlaybackStateUpdate {
     shuffle: bool,
     repeat_track: bool,
     repeat_context: bool,
+}
+
+#[derive(Serialize)]
+struct LoadingNotification {
+    track_uri: String,
+    position_ms: u32,
 }
 
 /// Get current timestamp in milliseconds since UNIX epoch
@@ -187,6 +195,16 @@ pub extern "C" fn spotifly_register_state_update_callback(callback: extern "C" f
 #[no_mangle]
 pub extern "C" fn spotifly_register_volume_callback(callback: extern "C" fn(u16)) {
     let mut cb = VOLUME_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Registers a callback to receive loading notifications.
+/// Called when a new track starts loading (before metadata is fetched).
+/// This fires earlier than TrackChanged (~180ms vs ~620ms after command).
+/// The callback receives JSON with track_uri and position_ms.
+#[no_mangle]
+pub extern "C" fn spotifly_register_loading_callback(callback: extern "C" fn(*const c_char)) {
+    let mut cb = LOADING_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
 
@@ -291,8 +309,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
     };
     debug!(
         "Player initialized: bitrate={}kbps, gapless={}",
-        _bitrate_kbps,
-        gapless
+        _bitrate_kbps, gapless
     );
 
     let player_config = PlayerConfig {
@@ -373,6 +390,22 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                         Some(PlayerEvent::VolumeChanged { volume }) => {
                             debug!("VolumeChanged event: {}", volume);
                             check_and_send_volume(volume as u32);
+                        }
+                        Some(PlayerEvent::Loading { track_id, position_ms, .. }) => {
+                            debug!("Loading event: {} at {}ms", track_id, position_ms);
+                            let cb_guard = LOADING_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                let notification = LoadingNotification {
+                                    track_uri: track_id.to_string(),
+                                    position_ms,
+                                };
+                                if let Ok(json) = serde_json::to_string(&notification) {
+                                    let c_str = CString::new(json).unwrap();
+                                    cb(c_str.as_ptr());
+                                }
+                            }
                         }
                         None => break,
                         _ => {}
@@ -473,9 +506,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
         Err(_e) => {
             // Spirc failed - fall back to manual session connection for basic playback
             debug!("Spirc init failed: {:?}", _e);
-            debug!(
-                "Falling back to basic playback (Connect won't be available)"
-            );
+            debug!("Falling back to basic playback (Connect won't be available)");
 
             // Connect session manually so basic playback works
             if let Err(connect_err) = session.connect(credentials, true).await {
@@ -587,10 +618,7 @@ fn process_and_send_queue(player_state: PlayerState) {
 
     // Log context URI for queue processing too
     if !player_state.context_uri.is_empty() {
-        debug!(
-            "Queue context URI: {}",
-            player_state.context_uri
-        );
+        debug!("Queue context URI: {}", player_state.context_uri);
     }
 
     let cb_guard = QUEUE_CALLBACK.lock().unwrap();
@@ -613,11 +641,7 @@ fn process_and_send_queue(player_state: PlayerState) {
 
         // Process current track
         let current_track = player_state.track.into_option().and_then(|t| {
-            debug!(
-                "current track[0] uri='{}' provider='{}'",
-                t.uri,
-                t.provider
-            );
+            debug!("current track[0] uri='{}' provider='{}'", t.uri, t.provider);
             if t.uri.starts_with("spotify:track:") {
                 Some(to_queue_item(&t))
             } else {
@@ -631,9 +655,7 @@ fn process_and_send_queue(player_state: PlayerState) {
             if i < 3 || !t.uri.starts_with("spotify:track:") {
                 debug!(
                     "next track[{}] uri='{}' provider='{}'",
-                    i,
-                    t.uri,
-                    t.provider
+                    i, t.uri, t.provider
                 );
             }
 
@@ -658,9 +680,7 @@ fn process_and_send_queue(player_state: PlayerState) {
             if i < 3 || !t.uri.starts_with("spotify:track:") {
                 debug!(
                     "prev track[{}] uri='{}' provider='{}'",
-                    i,
-                    t.uri,
-                    t.provider
+                    i, t.uri, t.provider
                 );
             }
 
@@ -802,10 +822,7 @@ pub extern "C" fn spotifly_play_uri(uri_or_url: *const c_char) -> i32 {
             // Create LoadRequest - use from_context_uri for albums/playlists/artists,
             // from_tracks for single tracks
             let load_request = if uri_str.starts_with("spotify:track:") {
-                debug!(
-                    "Spirc.load(LoadRequest::from_tracks([{}]))",
-                    uri_str
-                );
+                debug!("Spirc.load(LoadRequest::from_tracks([{}]))", uri_str);
                 LoadRequest::from_tracks(
                     vec![uri_str.clone()],
                     LoadRequestOptions {
@@ -815,10 +832,7 @@ pub extern "C" fn spotifly_play_uri(uri_or_url: *const c_char) -> i32 {
                     },
                 )
             } else {
-                debug!(
-                    "Spirc.load(LoadRequest::from_context_uri({}))",
-                    uri_str
-                );
+                debug!("Spirc.load(LoadRequest::from_context_uri({}))", uri_str);
                 LoadRequest::from_context_uri(
                     uri_str.clone(),
                     LoadRequestOptions {
@@ -1268,10 +1282,7 @@ pub extern "C" fn spotifly_transfer_playback(to_device_id: *const c_char) -> i32
         }
     };
 
-    debug!(
-        "spotifly_transfer_playback called: {}",
-        to_device_str
-    );
+    debug!("spotifly_transfer_playback called: {}", to_device_str);
 
     let session_guard = SESSION.lock().unwrap();
     let session = match session_guard.as_ref() {
