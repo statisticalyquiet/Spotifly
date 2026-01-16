@@ -144,4 +144,17 @@ final class ArtistService {
 
         return albums
     }
+
+    // MARK: - Unfollow Artist
+
+    /// Unfollow an artist (remove from followed artists)
+    func unfollowArtist(artistId: String, accessToken: String) async throws {
+        try await SpotifyAPI.unfollowArtist(
+            accessToken: accessToken,
+            artistId: artistId,
+        )
+
+        // Update store on success
+        store.removeArtistFromUserLibrary(artistId)
+    }
 }

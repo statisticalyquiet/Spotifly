@@ -19,11 +19,13 @@ struct AlbumDetailView: View {
     @Environment(SpotifySession.self) private var session
     @Environment(AppStore.self) private var store
     @Environment(AlbumService.self) private var albumService
+    @Environment(NavigationCoordinator.self) private var navigationCoordinator
 
     @State private var album: Album?
     @State private var isLoadingAlbum = false
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showRemoveConfirmation = false
 
     /// Initialize with an album ID (fetches album data)
     init(albumId: String, playbackViewModel: PlaybackViewModel) {
@@ -43,6 +45,11 @@ struct AlbumDetailView: View {
     private var tracks: [Track] {
         guard let storedAlbum = store.albums[albumId] else { return [] }
         return storedAlbum.trackIds.compactMap { store.tracks[$0] }
+    }
+
+    /// Whether this album is in the user's library
+    private var isInLibrary: Bool {
+        store.userAlbumIds.contains(albumId)
     }
 
     var body: some View {
@@ -74,6 +81,14 @@ struct AlbumDetailView: View {
                 await loadAlbum()
             }
             await loadTracks()
+        }
+        .alert("Remove from Library", isPresented: $showRemoveConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Remove", role: .destructive) {
+                removeFromLibrary()
+            }
+        } message: {
+            Text("Are you sure you want to remove \"\(album?.name ?? "")\" from your library?")
         }
     }
 
@@ -178,6 +193,17 @@ struct AlbumDetailView: View {
                                 Label("Share", systemImage: "square.and.arrow.up")
                             }
                             .disabled(album.externalUrl == nil)
+
+                            // Only show remove option if album is in library
+                            if isInLibrary {
+                                Divider()
+
+                                Button(role: .destructive) {
+                                    showRemoveConfirmation = true
+                                } label: {
+                                    Label("Remove from Library", systemImage: "minus.circle")
+                                }
+                            }
                         } label: {
                             Image(systemName: "ellipsis.circle.fill")
                                 .font(.title2)
@@ -288,5 +314,21 @@ struct AlbumDetailView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(externalUrl, forType: .string)
+    }
+
+    private func removeFromLibrary() {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                try await albumService.removeAlbumFromLibrary(
+                    albumId: albumId,
+                    accessToken: token,
+                )
+                // Navigate away from the removed album
+                navigationCoordinator.clearAlbumSelection()
+            } catch {
+                errorMessage = "Failed to remove album: \(error.localizedDescription)"
+            }
+        }
     }
 }

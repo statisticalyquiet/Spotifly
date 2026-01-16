@@ -52,7 +52,7 @@ extension SpotifyAPI {
 
     /// Fetches user's saved albums from Spotify Web API
     static func fetchUserAlbums(accessToken: String, limit: Int = 50, offset: Int = 0) async throws -> AlbumsResponse {
-        let urlString = "\(baseURL)/me/albums?limit=\(limit)&offset=\(offset)&fields=items(album(id,name,uri,total_tracks,release_date,album_type,artists(name),images,tracks(items(duration_ms)))),total,next"
+        let urlString = "\(baseURL)/me/albums?limit=\(limit)&offset=\(offset)&fields=items(album(id,name,uri,total_tracks,release_date,album_type,artists(name),images,tracks(items(duration_ms)),external_urls(spotify))),total,next"
         #if DEBUG
             apiLogger.debug("[GET] \(urlString)")
         #endif
@@ -132,6 +132,41 @@ extension SpotifyAPI {
             throw SpotifyAPIError.unauthorized
         case 404:
             throw SpotifyAPIError.notFound
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
+    // MARK: - Remove Saved Album
+
+    /// Removes an album from the user's library
+    static func removeUserAlbum(accessToken: String, albumId: String) async throws {
+        let urlString = "\(baseURL)/me/albums?ids=\(albumId)"
+        #if DEBUG
+            apiLogger.debug("[DELETE] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200:
+            return
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        case 403:
+            throw SpotifyAPIError.apiError("Not authorized to modify library")
         default:
             try throwAPIError(data: data, statusCode: httpResponse.statusCode)
         }

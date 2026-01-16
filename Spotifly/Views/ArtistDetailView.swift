@@ -28,6 +28,12 @@ struct ArtistDetailView: View {
     @State private var isLoadingAlbums = false
     @State private var errorMessage: String?
     @State private var showAllAlbums = false
+    @State private var showUnfollowConfirmation = false
+
+    /// Whether this artist is in the user's followed artists
+    private var isFollowing: Bool {
+        store.userArtistIds.contains(artistId)
+    }
 
     /// Initialize with an artist ID (fetches artist data)
     init(artistId: String, playbackViewModel: PlaybackViewModel) {
@@ -73,6 +79,14 @@ struct ArtistDetailView: View {
             }
             await loadTopTracks()
             await loadAlbums()
+        }
+        .alert("Unfollow Artist", isPresented: $showUnfollowConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Unfollow", role: .destructive) {
+                unfollowArtist()
+            }
+        } message: {
+            Text("Are you sure you want to unfollow \"\(artist?.name ?? "")\"?")
         }
     }
 
@@ -375,6 +389,17 @@ struct ArtistDetailView: View {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
             .disabled(artist.externalUrl == nil)
+
+            // Only show unfollow option if artist is being followed
+            if isFollowing {
+                Divider()
+
+                Button(role: .destructive) {
+                    showUnfollowConfirmation = true
+                } label: {
+                    Label("Unfollow", systemImage: "person.badge.minus")
+                }
+            }
         } label: {
             Image(systemName: "ellipsis.circle.fill")
                 .font(.title2)
@@ -412,6 +437,22 @@ struct ArtistDetailView: View {
             String(format: "%.1fK", Double(count) / 1000.0)
         } else {
             "\(count)"
+        }
+    }
+
+    private func unfollowArtist() {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                try await artistService.unfollowArtist(
+                    artistId: artistId,
+                    accessToken: token,
+                )
+                // Navigate away from the unfollowed artist
+                navigationCoordinator.clearArtistSelection()
+            } catch {
+                errorMessage = "Failed to unfollow artist: \(error.localizedDescription)"
+            }
         }
     }
 }

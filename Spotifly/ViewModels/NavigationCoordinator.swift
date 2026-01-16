@@ -135,4 +135,14 @@ final class NavigationCoordinator {
     func clearPlaylistSelection() {
         pendingPlaylist = nil
     }
+
+    /// Clear the current album selection (e.g., after removal from library)
+    func clearAlbumSelection() {
+        viewingAlbumId = nil
+    }
+
+    /// Clear the current artist selection (e.g., after unfollowing)
+    func clearArtistSelection() {
+        viewingArtistId = nil
+    }
 }

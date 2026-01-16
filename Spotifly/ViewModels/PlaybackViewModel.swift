@@ -88,6 +88,7 @@ final class PlaybackViewModel {
     private var playbackStateSubscription: AnyCancellable?
     private var volumeSubscription: AnyCancellable?
     private var sessionDisconnectedSubscription: AnyCancellable?
+    private var sessionConnectedSubscription: AnyCancellable?
     private var loadingSubscription: AnyCancellable?
     /// Flag to prevent feedback loop when we set volume locally
     private var isSettingVolumeLocally = false
@@ -96,10 +97,16 @@ final class PlaybackViewModel {
     /// Token provider for reinitialization after session disconnect
     private var tokenProvider: (@Sendable () async -> String)?
 
+    /// State to restore after seamless reconnection
+    private var pendingResumeTrackUri: String?
+    private var pendingResumePositionMs: UInt32 = 0
+    private var pendingResumeWasPlaying: Bool = false
+
     private init() {
         setupPlaybackStateSubscription()
         setupVolumeSubscription()
         setupSessionDisconnectedSubscription()
+        setupSessionConnectedSubscription()
         setupLoadingSubscription()
         setupRemoteCommandCenter()
 
@@ -517,19 +524,83 @@ final class PlaybackViewModel {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self else { return }
+
+                // Capture current playback state for seamless resumption
+                let wasPlaying = isPlaying
+                let trackUri = currentTrackUri
+                let positionMs = currentPositionMs
+
                 #if DEBUG
-                    print("[PlaybackViewModel] Session disconnected - reinitializing player")
+                    print("[PlaybackViewModel] Session disconnected - capturing state: uri=\(trackUri ?? "nil"), pos=\(positionMs)ms, playing=\(wasPlaying)")
                 #endif
+
+                // Store state for resumption after reconnect
+                if wasPlaying, let uri = trackUri, !uri.isEmpty {
+                    pendingResumeTrackUri = uri
+                    pendingResumePositionMs = positionMs
+                    pendingResumeWasPlaying = true
+                }
 
                 // Mark as not initialized so next action reinitializes
                 isInitialized = false
-                isPlaying = false
+                // Don't set isPlaying = false yet - keep UI showing playing state during reconnect
 
                 // If we have a token provider, reinitialize automatically
                 if let tokenProvider {
                     Task { @MainActor in
                         let token = await tokenProvider()
                         await self.initializeIfNeeded(accessToken: token)
+                    }
+                }
+            }
+    }
+
+    /// Subscribe to session connection events from Spirc
+    /// Resumes playback if we have pending state from a disconnect
+    private func setupSessionConnectedSubscription() {
+        sessionConnectedSubscription = SpotifyPlayer.sessionConnected
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self else { return }
+
+                // Check if we have pending playback to resume
+                guard pendingResumeWasPlaying,
+                      let trackUri = pendingResumeTrackUri,
+                      !trackUri.isEmpty
+                else {
+                    return
+                }
+
+                let positionMs = pendingResumePositionMs
+
+                #if DEBUG
+                    print("[PlaybackViewModel] Session reconnected - resuming playback: uri=\(trackUri), pos=\(positionMs)ms")
+                #endif
+
+                // Clear pending state
+                pendingResumeTrackUri = nil
+                pendingResumePositionMs = 0
+                pendingResumeWasPlaying = false
+
+                // Resume playback after a short delay to ensure spirc is fully ready
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(100))
+
+                    // Resume the track at the saved position
+                    do {
+                        try await SpotifyPlayer.play(uriOrUrl: trackUri)
+                        // Seek to the position we were at (add a small buffer for the time elapsed)
+                        try? await Task.sleep(for: .milliseconds(200))
+                        try SpotifyPlayer.seek(positionMs: positionMs)
+                        #if DEBUG
+                            print("[PlaybackViewModel] Seamless reconnect complete - playback resumed")
+                        #endif
+                    } catch {
+                        #if DEBUG
+                            print("[PlaybackViewModel] Failed to resume playback after reconnect: \(error)")
+                        #endif
+                        // Reset playing state if we couldn't resume
+                        self.isPlaying = false
                     }
                 }
             }

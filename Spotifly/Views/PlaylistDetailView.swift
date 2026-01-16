@@ -27,6 +27,7 @@ struct PlaylistDetailView: View {
     @State private var errorMessage: String?
     @State private var showEditDetailsDialog = false
     @State private var showDeleteConfirmation = false
+    @State private var showUnfollowConfirmation = false
     @State private var editingPlaylistName = ""
     @State private var editingPlaylistDescription = ""
     @State private var playlistName: String = ""
@@ -133,6 +134,14 @@ struct PlaylistDetailView: View {
             }
         } message: {
             Text("Are you sure you want to delete \"\(playlistName)\"? This action cannot be undone.")
+        }
+        .alert("Unfollow Playlist", isPresented: $showUnfollowConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Unfollow", role: .destructive) {
+                unfollowPlaylist()
+            }
+        } message: {
+            Text("Are you sure you want to unfollow \"\(playlistName)\"?")
         }
     }
 
@@ -294,6 +303,15 @@ struct PlaylistDetailView: View {
                 } label: {
                     Label("Delete Playlist", systemImage: "trash")
                 }
+            } else {
+                // Non-owner can unfollow the playlist
+                Divider()
+
+                Button(role: .destructive) {
+                    showUnfollowConfirmation = true
+                } label: {
+                    Label("Unfollow Playlist", systemImage: "minus.circle")
+                }
             }
         } label: {
             Image(systemName: "ellipsis.circle.fill")
@@ -442,6 +460,23 @@ struct PlaylistDetailView: View {
                 navigationCoordinator.clearPlaylistSelection()
             } catch {
                 errorMessage = "Failed to delete playlist: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func unfollowPlaylist() {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                // Uses the same API endpoint as delete - it's "unfollow" for both
+                try await playlistService.deletePlaylist(
+                    playlistId: playlistId,
+                    accessToken: token,
+                )
+                // Navigate away from the unfollowed playlist
+                navigationCoordinator.clearPlaylistSelection()
+            } catch {
+                errorMessage = "Failed to unfollow playlist: \(error.localizedDescription)"
             }
         }
     }

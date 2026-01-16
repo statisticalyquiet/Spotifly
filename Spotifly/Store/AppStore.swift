@@ -377,6 +377,16 @@ final class AppStore {
         playlists.removeValue(forKey: playlistId)
     }
 
+    /// Remove album from user's library
+    func removeAlbumFromUserLibrary(_ albumId: String) {
+        userAlbumIds.removeAll { $0 == albumId }
+    }
+
+    /// Remove artist from user's followed artists
+    func removeArtistFromUserLibrary(_ artistId: String) {
+        userArtistIds.removeAll { $0 == artistId }
+    }
+
     // MARK: - Search Actions
 
     func setSearchResults(_ results: SearchResults?) {
