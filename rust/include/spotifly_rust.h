@@ -20,9 +20,13 @@ void spotifly_free_string(char* s);
 //  -1  = general error
 //  -2  = session disconnected, needs reinitialization
 //        (call spotifly_init_player again with a fresh token)
+//  -3  = session not connected (command rejected, wait for session to connect)
 //
 // When you receive -2, the Spirc channel has closed (e.g., due to idle timeout).
 // Get a fresh access token and call spotifly_init_player() to reconnect.
+//
+// When you receive -3, the session is not yet connected. Wait for the
+// session_connected callback before retrying the command.
 
 // ============================================================================
 // Playback functions
@@ -131,6 +135,17 @@ typedef void (*SessionDisconnectedCallback)(void);
 /// Called when the Spotify session is disconnected (e.g., idle timeout).
 /// When this fires, reinitialize the player with a fresh token.
 void spotifly_register_session_disconnected_callback(SessionDisconnectedCallback callback);
+
+/// Callback function type for session connection notifications.
+typedef void (*SessionConnectedCallback)(void);
+
+/// Registers a callback to receive session connection notifications.
+/// Called when the Spotify session is connected and ready for playback commands.
+void spotifly_register_session_connected_callback(SessionConnectedCallback callback);
+
+/// Returns 1 if session is connected and ready for commands, 0 otherwise.
+/// Use this to check if playback commands will be accepted.
+int32_t spotifly_is_session_connected(void);
 
 /// Skips to the next track in the queue.
 /// Returns 0 on success, -1 on error, -2 if session disconnected.

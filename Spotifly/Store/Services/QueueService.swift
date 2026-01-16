@@ -17,6 +17,8 @@ final class QueueService {
     private let tokenProvider: () async -> String
     private var queueSubscription: AnyCancellable?
     private var metadataFetchTask: Task<Void, Never>?
+    private var pendingTrackIds: Set<String> = []
+    private var debounceTask: Task<Void, Never>?
 
     init(store: AppStore, tokenProvider: @escaping () async -> String) {
         self.store = store
@@ -66,10 +68,8 @@ final class QueueService {
     // MARK: - Metadata Fetching
 
     /// Fetch track metadata from Web API for tracks not already in the store
+    /// Uses debouncing to avoid cancelling requests during rapid queue updates
     private func fetchTrackMetadata(for uris: [String]) {
-        // Cancel any pending fetch
-        metadataFetchTask?.cancel()
-
         // Extract unique track IDs from URIs (queue can have duplicates)
         var seenIds = Set<String>()
         let uniqueTrackIds = uris.compactMap { uri -> String? in
@@ -93,8 +93,43 @@ final class QueueService {
             return
         }
 
+        // Accumulate track IDs and debounce the fetch
+        pendingTrackIds.formUnion(trackIdsToFetch)
+
+        // Cancel previous debounce timer (not the fetch itself)
+        debounceTask?.cancel()
+
+        debounceTask = Task { [weak self] in
+            // Wait for rapid updates to settle
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+
+            await self?.executeFetch()
+        }
+    }
+
+    /// Execute the actual fetch for accumulated track IDs
+    private func executeFetch() async {
+        let trackIdsToFetch = Array(pendingTrackIds)
+        pendingTrackIds.removeAll()
+
+        guard !trackIdsToFetch.isEmpty else { return }
+
+        // Don't cancel ongoing fetch - let it complete and just add more
+        // Wait for any in-progress fetch to complete first
+        if let existingTask = metadataFetchTask {
+            _ = await existingTask.value
+        }
+
+        // Re-filter in case some were fetched by previous task
+        let stillNeeded = trackIdsToFetch.filter { store.tracks[$0] == nil }
+        guard !stillNeeded.isEmpty else {
+            updateNowPlayingMetadata()
+            return
+        }
+
         #if DEBUG
-            print("[QueueService] Fetching \(trackIdsToFetch.count) tracks from Web API (\(uniqueTrackIds.count - trackIdsToFetch.count) cached)")
+            print("[QueueService] Fetching \(stillNeeded.count) tracks from Web API")
         #endif
 
         metadataFetchTask = Task { [weak self, tokenProvider] in
@@ -102,7 +137,7 @@ final class QueueService {
 
             do {
                 let accessToken = await tokenProvider()
-                let trackData = try await SpotifyAPI.fetchTracks(accessToken: accessToken, trackIds: trackIdsToFetch)
+                let trackData = try await SpotifyAPI.fetchTracks(accessToken: accessToken, trackIds: stillNeeded)
 
                 guard !Task.isCancelled else { return }
 
@@ -141,6 +176,8 @@ final class QueueService {
                 #endif
             }
         }
+
+        _ = await metadataFetchTask?.value
     }
 
     /// Update PlaybackViewModel with current track metadata for Now Playing info

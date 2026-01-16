@@ -143,19 +143,10 @@ final class PlaybackViewModel {
                 try? await Task.sleep(for: .milliseconds(100))
             }
 
-            if spircReady {
-                // Fetch devices and check if any is active
-                let response = try? await SpotifyAPI.fetchAvailableDevices(accessToken: accessToken)
-                let hasActiveDevice = response?.devices.contains { $0.isActive } ?? false
-
-                // If no active device, activate ourselves
-                if !hasActiveDevice {
-                    #if DEBUG
-                        print("[Spotifly] No active device found, activating local player")
-                    #endif
-                    try? SpotifyPlayer.transferToLocal()
-                }
-            }
+            // Note: We don't auto-transfer on init anymore.
+            // When the user plays something, spirc.load() automatically makes this device active.
+            // transferToLocal() is only used for explicit "Transfer playback here" action.
+            _ = spircReady // Acknowledge we waited for Spirc to be ready
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -254,6 +254,22 @@ private nonisolated func handleSessionDisconnectedCallback() {
     sessionDisconnectedSubject.send()
 }
 
+/// Registers the session connected callback with Rust (fires when session is ready)
+private nonisolated func registerSessionConnectedCallback() {
+    spotifly_register_session_connected_callback {
+        handleSessionConnectedCallback()
+    }
+}
+
+/// C callback for session connection notifications from Rust
+/// Fires when the Spotify session is connected and ready for playback commands
+private nonisolated func handleSessionConnectedCallback() {
+    #if DEBUG
+        print("[SpotifyPlayer] Session connected event received - ready for commands")
+    #endif
+    sessionConnectedSubject.send()
+}
+
 /// C callback for state update notifications from Rust
 /// Triggers a Web API fetch to get the current queue state
 private nonisolated func handleStateUpdateCallback() {
@@ -538,6 +554,9 @@ enum SpotifyPlayerError: Error, LocalizedError, Sendable {
 /// Global subject for session disconnection (needs reinit)
 private nonisolated(unsafe) let sessionDisconnectedSubject = PassthroughSubject<Void, Never>()
 
+/// Global subject for session connection (ready for commands)
+private nonisolated(unsafe) let sessionConnectedSubject = PassthroughSubject<Void, Never>()
+
 /// Error code returned by Rust when session is disconnected
 private let errorNeedsReinit: Int32 = -2
 
@@ -561,6 +580,7 @@ enum SpotifyPlayer {
         registerLoadingCallback()
         registerQueueChangedCallback()
         registerSessionDisconnectedCallback()
+        registerSessionConnectedCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
@@ -615,6 +635,17 @@ enum SpotifyPlayer {
     /// Subscribe to this to trigger automatic reconnection with a fresh token.
     static var sessionDisconnected: AnyPublisher<Void, Never> {
         sessionDisconnectedSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher that emits when the session is connected and ready for commands.
+    /// Subscribe to this to enable playback controls after initialization or reconnection.
+    static var sessionConnected: AnyPublisher<Void, Never> {
+        sessionConnectedSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns whether the session is currently connected and ready for playback commands.
+    static var isSessionConnected: Bool {
+        spotifly_is_session_connected() == 1
     }
 
     /// Refreshes the queue from Spotify Web API.

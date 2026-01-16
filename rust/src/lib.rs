@@ -53,7 +53,27 @@ static QUEUE_CHANGED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>>
     Lazy::new(|| Mutex::new(None));
 static SESSION_DISCONNECTED_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
     Lazy::new(|| Mutex::new(None));
+static SESSION_CONNECTED_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
+    Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
+
+// Session state tracking - guards playback commands until session is ready
+struct SessionConnectionState {
+    connection_id: Option<String>,
+    is_connected: bool,
+}
+
+impl Default for SessionConnectionState {
+    fn default() -> Self {
+        Self {
+            connection_id: None,
+            is_connected: false,
+        }
+    }
+}
+
+static SESSION_CONNECTION_STATE: Lazy<Mutex<SessionConnectionState>> =
+    Lazy::new(|| Mutex::new(SessionConnectionState::default()));
 
 // Position tracking - updated from player events
 static POSITION_MS: AtomicU32 = AtomicU32::new(0);
@@ -232,6 +252,15 @@ pub extern "C" fn spotifly_register_queue_changed_callback(callback: extern "C" 
 #[no_mangle]
 pub extern "C" fn spotifly_register_session_disconnected_callback(callback: extern "C" fn()) {
     let mut cb = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Registers a callback to receive session connection notifications.
+/// Called when the Spotify session is fully connected and ready for commands.
+/// Wait for this callback before attempting playback operations after init/reinit.
+#[no_mangle]
+pub extern "C" fn spotifly_register_session_connected_callback(callback: extern "C" fn()) {
+    let mut cb = SESSION_CONNECTED_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
 
@@ -449,7 +478,28 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                         }
                         Some(PlayerEvent::SessionDisconnected { connection_id, user_name }) => {
                             debug!("SessionDisconnected event: connection_id={}, user={}", connection_id, user_name);
+                            // Update session state
+                            {
+                                let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
+                                state.is_connected = false;
+                                state.connection_id = None;
+                            }
                             let cb_guard = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                cb();
+                            }
+                        }
+                        Some(PlayerEvent::SessionConnected { connection_id, user_name }) => {
+                            debug!("SessionConnected event: connection_id={}, user={}", connection_id, user_name);
+                            // Update session state
+                            {
+                                let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
+                                state.is_connected = true;
+                                state.connection_id = Some(connection_id);
+                            }
+                            let cb_guard = SESSION_CONNECTED_CALLBACK.lock().unwrap();
                             if let Some(callback) = *cb_guard {
                                 let cb = callback;
                                 drop(cb_guard);
@@ -550,7 +600,28 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
             let mut spirc_guard = SPIRC.lock().unwrap();
             *spirc_guard = Some(spirc_arc);
             SPIRC_READY.store(true, Ordering::SeqCst);
+
+            // Mark session as connected immediately - Spirc is ready for commands
+            // The SessionConnected event will update connection_id when it arrives
+            {
+                let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
+                state.is_connected = true;
+                debug!("Session state: is_connected = true");
+            }
+
             debug!("Spirc ready - connected to Spotify Connect");
+
+            // Activate this device in Spotify Connect by calling transfer(None)
+            // This makes us the active device so load() commands work immediately
+            // We do this at init time, not at play time, to avoid delays when playing
+            debug!("Activating device with transfer(None)");
+            if let Some(spirc) = spirc_guard.as_ref() {
+                if let Err(_e) = spirc.transfer(None) {
+                    debug!("Initial transfer failed (non-fatal, device may have no previous state): {:?}", _e);
+                }
+            }
+            drop(spirc_guard);
+            IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
         }
         Err(_e) => {
             // Spirc failed - fall back to manual session connection for basic playback
@@ -594,8 +665,28 @@ fn is_channel_closed_error(err: &librespot_core::Error) -> bool {
 /// Error codes:
 /// -1 = general error
 /// -2 = channel closed, needs reinit (call spotifly_init_player again)
+/// -3 = session not connected, wait for session_connected callback
 const ERROR_GENERAL: i32 = -1;
 const ERROR_NEEDS_REINIT: i32 = -2;
+const ERROR_NOT_CONNECTED: i32 = -3;
+
+/// Returns 1 if the session is connected and ready for commands, 0 otherwise.
+#[no_mangle]
+pub extern "C" fn spotifly_is_session_connected() -> i32 {
+    let state = SESSION_CONNECTION_STATE.lock().unwrap();
+    if state.is_connected { 1 } else { 0 }
+}
+
+/// Helper to check if session is connected. Returns ERROR_NOT_CONNECTED if not.
+fn require_session_connected() -> Result<(), i32> {
+    let state = SESSION_CONNECTION_STATE.lock().unwrap();
+    if state.is_connected {
+        Ok(())
+    } else {
+        debug!("Command rejected: session not connected");
+        Err(ERROR_NOT_CONNECTED)
+    }
+}
 
 fn send_playback_state(player_state: &PlayerState) {
     debug!("send_playback_state called");
@@ -781,6 +872,9 @@ fn process_and_send_queue(player_state: PlayerState) {
 #[no_mangle]
 pub extern "C" fn spotifly_play_tracks(track_uris_json: *const c_char) -> i32 {
     debug!("spotifly_play_tracks called");
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
     if track_uris_json.is_null() {
         debug!("Play tracks error: track_uris_json is null");
         return -1;
@@ -864,6 +958,10 @@ pub extern "C" fn spotifly_play_uri(uri_or_url: *const c_char) -> i32 {
     let uri_str = url_to_uri(&input_str);
     debug!("spotifly_play_uri called: {}", uri_str);
 
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
+
     // Use Spirc.load() with LoadRequest for proper Connect state sync
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
@@ -916,6 +1014,9 @@ pub extern "C" fn spotifly_play_uri(uri_or_url: *const c_char) -> i32 {
 #[no_mangle]
 pub extern "C" fn spotifly_pause() -> i32 {
     debug!("spotifly_pause called");
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => match spirc.pause() {
@@ -944,6 +1045,9 @@ pub extern "C" fn spotifly_pause() -> i32 {
 #[no_mangle]
 pub extern "C" fn spotifly_resume() -> i32 {
     debug!("spotifly_resume called");
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => match spirc.play() {
@@ -1054,6 +1158,13 @@ pub extern "C" fn spotifly_cleanup() {
     POSITION_TIMESTAMP_MS.store(0, Ordering::SeqCst);
     LAST_VOLUME.store(0, Ordering::SeqCst);
 
+    // Reset session connection state
+    {
+        let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
+        state.is_connected = false;
+        state.connection_id = None;
+    }
+
     debug!("spotifly_cleanup complete - ready for reinitialization");
 }
 
@@ -1097,6 +1208,9 @@ pub extern "C" fn spotifly_get_position_ms() -> u32 {
 #[no_mangle]
 pub extern "C" fn spotifly_next() -> i32 {
     debug!("spotifly_next called");
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => match spirc.next() {
@@ -1122,6 +1236,9 @@ pub extern "C" fn spotifly_next() -> i32 {
 #[no_mangle]
 pub extern "C" fn spotifly_previous() -> i32 {
     debug!("spotifly_previous called");
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => match spirc.prev() {
@@ -1147,6 +1264,9 @@ pub extern "C" fn spotifly_previous() -> i32 {
 #[no_mangle]
 pub extern "C" fn spotifly_seek(position_ms: u32) -> i32 {
     debug!("spotifly_seek called: {}ms", position_ms);
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => match spirc.set_position_ms(position_ms) {
@@ -1188,6 +1308,10 @@ pub extern "C" fn spotifly_play_radio(track_uri: *const c_char) -> i32 {
     };
 
     debug!("spotifly_play_radio called: {}", uri_str);
+
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
 
     let session_guard = SESSION.lock().unwrap();
     let session = match session_guard.as_ref() {
@@ -1266,6 +1390,9 @@ pub extern "C" fn spotifly_play_radio(track_uri: *const c_char) -> i32 {
 #[no_mangle]
 pub extern "C" fn spotifly_set_volume(volume: u16) -> i32 {
     debug!("spotifly_set_volume called: {}", volume);
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => match spirc.set_volume(volume) {
@@ -1345,6 +1472,9 @@ pub extern "C" fn spotifly_set_initial_volume(volume: u16) {
 #[no_mangle]
 pub extern "C" fn spotifly_transfer_to_local() -> i32 {
     debug!("spotifly_transfer_to_local called");
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => {
@@ -1388,6 +1518,10 @@ pub extern "C" fn spotifly_transfer_playback(to_device_id: *const c_char) -> i32
     };
 
     debug!("spotifly_transfer_playback called: {}", to_device_str);
+
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
 
     let session_guard = SESSION.lock().unwrap();
     let session = match session_guard.as_ref() {
@@ -1466,6 +1600,10 @@ pub extern "C" fn spotifly_add_to_queue(track_uri: *const c_char) -> i32 {
     };
 
     debug!("[Spotifly] spotifly_add_to_queue called: {}", uri_str);
+
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
 
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
