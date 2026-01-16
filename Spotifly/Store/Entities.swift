@@ -110,6 +110,7 @@ struct Artist: Identifiable, Sendable, Hashable, Encodable {
     let imageURL: URL?
     let genres: [String]
     let followers: Int?
+    let externalUrl: String?
 }
 
 // MARK: - Playlist
@@ -124,6 +125,7 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
     var isPublic: Bool
     let ownerId: String
     let ownerName: String
+    let externalUrl: String?
 
     // Mutable state (populated when tracks are loaded)
     var trackIds: [String]
@@ -155,6 +157,7 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
         isPublic: Bool,
         ownerId: String,
         ownerName: String,
+        externalUrl: String? = nil,
         trackIds: [String] = [],
         totalDurationMs: Int? = nil,
         knownTrackCount: Int? = nil,
@@ -167,6 +170,7 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
         self.isPublic = isPublic
         self.ownerId = ownerId
         self.ownerName = ownerName
+        self.externalUrl = externalUrl
         self.trackIds = trackIds
         self.totalDurationMs = totalDurationMs
         _knownTrackCount = knownTrackCount

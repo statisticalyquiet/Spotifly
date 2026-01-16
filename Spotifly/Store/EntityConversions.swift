@@ -128,6 +128,7 @@ extension Artist {
         imageURL = artist.imageURL
         genres = artist.genres
         followers = artist.followers
+        externalUrl = artist.externalUrl
     }
 }
 
@@ -145,6 +146,7 @@ extension Playlist {
             isPublic: playlist.isPublic ?? true,
             ownerId: playlist.ownerId,
             ownerName: playlist.ownerName,
+            externalUrl: playlist.externalUrl,
             trackIds: [],
             totalDurationMs: playlist.totalDurationMs,
             knownTrackCount: playlist.trackCount,
@@ -162,6 +164,7 @@ extension Playlist {
             isPublic: playlist.isPublic ?? true,
             ownerId: playlist.ownerId,
             ownerName: playlist.ownerName,
+            externalUrl: playlist.externalUrl,
             trackIds: trackIds,
             totalDurationMs: totalDurationMs,
             knownTrackCount: nil, // We have actual tracks

@@ -251,7 +251,28 @@ struct PlaylistDetailView: View {
 
     private func playlistContextMenu() -> some View {
         Menu {
+            // Play Next - available to everyone
+            Button {
+                addToQueue()
+            } label: {
+                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            .disabled(tracks.isEmpty)
+
+            Divider()
+
+            // Share - available to everyone
+            Button {
+                copyToClipboard()
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .disabled(playlist?.externalUrl == nil)
+
+            // Owner-only options
             if isOwner {
+                Divider()
+
                 Button {
                     enterEditMode()
                 } label: {
@@ -499,6 +520,26 @@ struct PlaylistDetailView: View {
             // This properly loads the playlist context instead of individual tracks
             await playbackViewModel.play(uriOrUrl: playlist.uri, accessToken: token)
         }
+    }
+
+    private func addToQueue() {
+        Task {
+            let token = await session.validAccessToken()
+            for track in tracks {
+                await playbackViewModel.addToQueue(
+                    trackUri: track.uri,
+                    accessToken: token,
+                )
+            }
+        }
+    }
+
+    private func copyToClipboard() {
+        guard let externalUrl = playlist?.externalUrl else { return }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(externalUrl, forType: .string)
     }
 
     // MARK: - Edit Mode

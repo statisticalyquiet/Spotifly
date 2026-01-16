@@ -92,6 +92,7 @@ struct APIArtist: Sendable, Identifiable {
     let imageURL: URL?
     let name: String
     let uri: String
+    let externalUrl: String?
 }
 
 /// Response wrapper for artists endpoint
@@ -124,6 +125,7 @@ struct APIPlaylist: Sendable, Identifiable, DurationFormattable {
     let totalDurationMs: Int?
     var trackCount: Int
     let uri: String
+    let externalUrl: String?
 }
 
 /// Response wrapper for playlists endpoint
@@ -284,6 +286,12 @@ struct ArtistCodable: Decodable {
     let genres: [String]?
     let followers: FollowersCodable?
     let images: [ImageCodable]?
+    let externalUrls: ExternalUrlsCodable?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, uri, genres, followers, images
+        case externalUrls = "external_urls"
+    }
 }
 
 extension ArtistCodable {
@@ -296,6 +304,7 @@ extension ArtistCodable {
             imageURL: (images?.first?.url).flatMap { URL(string: $0) },
             name: name,
             uri: uri,
+            externalUrl: externalUrls?.spotify,
         )
     }
 }
@@ -423,6 +432,13 @@ struct PlaylistCodable: Decodable {
     let owner: OwnerCodable
     let `public`: Bool?
     let tracks: PlaylistTracksCodable?
+    let externalUrls: ExternalUrlsCodable?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, uri, description, images, owner, tracks
+        case `public`
+        case externalUrls = "external_urls"
+    }
 
     struct PlaylistTracksCodable: Decodable {
         let total: Int?
@@ -453,6 +469,7 @@ struct PlaylistCodable: Decodable {
             totalDurationMs: totalDurationMs,
             trackCount: tracks?.total ?? 0,
             uri: uri,
+            externalUrl: externalUrls?.spotify,
         )
     }
 }
