@@ -135,6 +135,41 @@ extension SpotifyAPI {
         }
     }
 
+    // MARK: - Follow Artist
+
+    /// Follows an artist (adds to user's followed artists)
+    static func followArtist(accessToken: String, artistId: String) async throws {
+        let urlString = "\(baseURL)/me/following?type=artist&ids=\(artistId)"
+        #if DEBUG
+            apiLogger.debug("[PUT] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 204:
+            return
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        case 403:
+            throw SpotifyAPIError.apiError("Not authorized to modify followed artists")
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
     // MARK: - User's Top Artists
 
     /// Fetches user's top artists from Spotify Web API

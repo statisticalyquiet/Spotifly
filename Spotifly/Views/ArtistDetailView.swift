@@ -390,14 +390,20 @@ struct ArtistDetailView: View {
             }
             .disabled(artist.externalUrl == nil)
 
-            // Only show unfollow option if artist is being followed
-            if isFollowing {
-                Divider()
+            // Show follow/unfollow option based on following status
+            Divider()
 
+            if isFollowing {
                 Button(role: .destructive) {
                     showUnfollowConfirmation = true
                 } label: {
                     Label("Unfollow", systemImage: "person.badge.minus")
+                }
+            } else {
+                Button {
+                    followArtist()
+                } label: {
+                    Label("Follow", systemImage: "person.badge.plus")
                 }
             }
         } label: {
@@ -452,6 +458,20 @@ struct ArtistDetailView: View {
                 navigationCoordinator.clearArtistSelection()
             } catch {
                 errorMessage = "Failed to unfollow artist: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func followArtist() {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                try await artistService.followArtist(
+                    artistId: artistId,
+                    accessToken: token,
+                )
+            } catch {
+                errorMessage = "Failed to follow artist: \(error.localizedDescription)"
             }
         }
     }

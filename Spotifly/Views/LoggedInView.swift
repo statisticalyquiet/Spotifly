@@ -122,6 +122,9 @@ struct LoggedInView: View {
             // Load startup data
             let token = await session.validAccessToken()
 
+            // Load user ID first (needed for playlist ownership checks)
+            await session.loadUserIdIfNeeded()
+
             // Load favorites so heart indicators work everywhere
             async let favorites: () = { try? await trackService.loadFavorites(accessToken: token) }()
 

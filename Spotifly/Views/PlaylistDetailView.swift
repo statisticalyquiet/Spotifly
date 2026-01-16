@@ -64,6 +64,11 @@ struct PlaylistDetailView: View {
         playlist?.ownerId == session.userId
     }
 
+    /// Whether this playlist is in the user's library
+    private var isInLibrary: Bool {
+        store.userPlaylistIds.contains(playlistId)
+    }
+
     /// Whether there are unsaved changes in edit mode
     private var hasChanges: Bool {
         guard let storedPlaylist = store.playlists[playlistId] else { return false }
@@ -304,13 +309,21 @@ struct PlaylistDetailView: View {
                     Label("Delete Playlist", systemImage: "trash")
                 }
             } else {
-                // Non-owner can unfollow the playlist
+                // Non-owner can follow/unfollow the playlist
                 Divider()
 
-                Button(role: .destructive) {
-                    showUnfollowConfirmation = true
-                } label: {
-                    Label("Unfollow Playlist", systemImage: "minus.circle")
+                if isInLibrary {
+                    Button(role: .destructive) {
+                        showUnfollowConfirmation = true
+                    } label: {
+                        Label("Unfollow Playlist", systemImage: "minus.circle")
+                    }
+                } else {
+                    Button {
+                        followPlaylist()
+                    } label: {
+                        Label("Follow Playlist", systemImage: "plus.circle")
+                    }
                 }
             }
         } label: {
@@ -477,6 +490,20 @@ struct PlaylistDetailView: View {
                 navigationCoordinator.clearPlaylistSelection()
             } catch {
                 errorMessage = "Failed to unfollow playlist: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func followPlaylist() {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                try await playlistService.followPlaylist(
+                    playlistId: playlistId,
+                    accessToken: token,
+                )
+            } catch {
+                errorMessage = "Failed to follow playlist: \(error.localizedDescription)"
             }
         }
     }

@@ -165,7 +165,18 @@ final class AlbumService {
         return try await fetchAlbumDetails(albumId: albumId, accessToken: accessToken)
     }
 
-    // MARK: - Remove Album from Library
+    // MARK: - Library Management
+
+    /// Save an album to the user's library
+    func saveAlbumToLibrary(albumId: String, accessToken: String) async throws {
+        try await SpotifyAPI.saveUserAlbum(
+            accessToken: accessToken,
+            albumId: albumId,
+        )
+
+        // Update store on success
+        store.addAlbumToUserLibrary(albumId)
+    }
 
     /// Remove an album from the user's library
     func removeAlbumFromLibrary(albumId: String, accessToken: String) async throws {

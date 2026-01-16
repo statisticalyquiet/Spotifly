@@ -172,6 +172,41 @@ extension SpotifyAPI {
         }
     }
 
+    // MARK: - Save Album
+
+    /// Saves an album to the user's library
+    static func saveUserAlbum(accessToken: String, albumId: String) async throws {
+        let urlString = "\(baseURL)/me/albums?ids=\(albumId)"
+        #if DEBUG
+            apiLogger.debug("[PUT] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200:
+            return
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        case 403:
+            throw SpotifyAPIError.apiError("Not authorized to modify library")
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
     // MARK: - New Releases
 
     /// Fetches new album releases from Spotify Web API

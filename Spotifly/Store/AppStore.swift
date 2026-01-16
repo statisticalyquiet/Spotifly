@@ -387,6 +387,24 @@ final class AppStore {
         userArtistIds.removeAll { $0 == artistId }
     }
 
+    /// Add album to user's library
+    func addAlbumToUserLibrary(_ albumId: String) {
+        guard !userAlbumIds.contains(albumId) else { return }
+        userAlbumIds.insert(albumId, at: 0)
+    }
+
+    /// Add artist to user's followed artists
+    func addArtistToUserLibrary(_ artistId: String) {
+        guard !userArtistIds.contains(artistId) else { return }
+        userArtistIds.insert(artistId, at: 0)
+    }
+
+    /// Add playlist to user's library (for followed playlists)
+    func addPlaylistToUserLibraryById(_ playlistId: String) {
+        guard !userPlaylistIds.contains(playlistId) else { return }
+        userPlaylistIds.insert(playlistId, at: 0)
+    }
+
     // MARK: - Search Actions
 
     func setSearchResults(_ results: SearchResults?) {

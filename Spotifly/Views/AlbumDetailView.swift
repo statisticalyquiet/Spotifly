@@ -194,14 +194,20 @@ struct AlbumDetailView: View {
                             }
                             .disabled(album.externalUrl == nil)
 
-                            // Only show remove option if album is in library
-                            if isInLibrary {
-                                Divider()
+                            // Show add/remove option based on library status
+                            Divider()
 
+                            if isInLibrary {
                                 Button(role: .destructive) {
                                     showRemoveConfirmation = true
                                 } label: {
                                     Label("Remove from Library", systemImage: "minus.circle")
+                                }
+                            } else {
+                                Button {
+                                    saveToLibrary()
+                                } label: {
+                                    Label("Add to Library", systemImage: "plus.circle")
                                 }
                             }
                         } label: {
@@ -328,6 +334,20 @@ struct AlbumDetailView: View {
                 navigationCoordinator.clearAlbumSelection()
             } catch {
                 errorMessage = "Failed to remove album: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func saveToLibrary() {
+        Task {
+            do {
+                let token = await session.validAccessToken()
+                try await albumService.saveAlbumToLibrary(
+                    albumId: albumId,
+                    accessToken: token,
+                )
+            } catch {
+                errorMessage = "Failed to add album: \(error.localizedDescription)"
             }
         }
     }

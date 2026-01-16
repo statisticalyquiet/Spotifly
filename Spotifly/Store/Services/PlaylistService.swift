@@ -187,6 +187,17 @@ final class PlaylistService {
         store.removePlaylistFromUserLibrary(playlistId)
     }
 
+    /// Follow (save) a playlist to the user's library
+    func followPlaylist(playlistId: String, accessToken: String) async throws {
+        try await SpotifyAPI.followPlaylist(
+            accessToken: accessToken,
+            playlistId: playlistId,
+        )
+
+        // Update store on success
+        store.addPlaylistToUserLibraryById(playlistId)
+    }
+
     // MARK: - Track Operations
 
     /// Add tracks to a playlist

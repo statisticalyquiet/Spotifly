@@ -272,6 +272,45 @@ extension SpotifyAPI {
         }
     }
 
+    /// Follows (saves) a playlist to the user's library
+    static func followPlaylist(accessToken: String, playlistId: String) async throws {
+        let urlString = "\(baseURL)/playlists/\(playlistId)/followers"
+        #if DEBUG
+            apiLogger.debug("[PUT] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Empty body required
+        request.httpBody = "{}".data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200:
+            return
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        case 403:
+            throw SpotifyAPIError.apiError("Not authorized to follow this playlist")
+        case 404:
+            throw SpotifyAPIError.notFound
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
     /// Removes tracks from a playlist
     static func removeTracksFromPlaylist(
         accessToken: String,
@@ -395,7 +434,7 @@ extension SpotifyAPI {
         }
 
         switch httpResponse.statusCode {
-        case 201:
+        case 200, 201:
             return
         case 401:
             throw SpotifyAPIError.unauthorized
