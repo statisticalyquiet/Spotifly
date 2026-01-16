@@ -26,15 +26,6 @@ struct SpeakersView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
-                Button {
-                    Task {
-                        let token = await session.validAccessToken()
-                        await deviceService.loadDevices(accessToken: token)
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .disabled(store.devicesIsLoading)
             }
             .padding()
 

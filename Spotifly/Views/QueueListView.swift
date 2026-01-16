@@ -7,6 +7,10 @@
 
 import SwiftUI
 
+extension Notification.Name {
+    static let scrollToCurrentTrack = Notification.Name("scrollToCurrentTrack")
+}
+
 struct QueueListView: View {
     @Environment(SpotifySession.self) private var session
     @Environment(AppStore.self) private var store
@@ -14,7 +18,6 @@ struct QueueListView: View {
     @Bindable var playbackViewModel: PlaybackViewModel
 
     @State private var scrollProxy: ScrollViewProxy?
-    @State private var isRefreshing = false
 
     /// Flattened queue: previous + current + next
     private var allTracks: [Track] {
@@ -69,6 +72,9 @@ struct QueueListView: View {
                 await queueService.loadFavorites(accessToken: token)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .scrollToCurrentTrack)) { _ in
+            scrollToCurrentTrack()
+        }
     }
 
     // MARK: - Header
@@ -87,37 +93,9 @@ struct QueueListView: View {
             }
 
             Spacer()
-
-            // Refresh button
-            Button {
-                refreshQueue()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.bordered)
-            .disabled(isRefreshing)
-            .help("queue.refresh")
-
-            // Scroll to current button
-            Button {
-                scrollToCurrentTrack()
-            } label: {
-                Image(systemName: "arrow.down.to.line")
-            }
-            .buttonStyle(.bordered)
-            .disabled(allTracks.isEmpty)
-            .help("queue.scroll_to_current")
         }
         .padding()
         .background(.regularMaterial)
-    }
-
-    private func refreshQueue() {
-        isRefreshing = true
-        Task {
-            await SpotifyPlayer.refreshQueue()
-            isRefreshing = false
-        }
     }
 
     // MARK: - Normal Mode Content

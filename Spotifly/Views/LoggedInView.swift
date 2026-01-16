@@ -206,6 +206,7 @@ struct LoggedInView: View {
         .searchable(text: $searchText, isPresented: $searchFieldFocused)
         .onSubmit(of: .search) { performSearch() }
         .onChange(of: searchText) { _, newValue in handleSearchTextChange(newValue) }
+        .toolbar { refreshToolbarItem }
     }
 
     @ViewBuilder
@@ -219,6 +220,31 @@ struct LoggedInView: View {
         .searchable(text: $searchText, isPresented: $searchFieldFocused)
         .onSubmit(of: .search) { performSearch() }
         .onChange(of: searchText) { _, newValue in handleSearchTextChange(newValue) }
+        .toolbar { refreshToolbarItem }
+    }
+
+    @ToolbarContentBuilder
+    private var refreshToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            if canRefreshCurrentSection {
+                Button {
+                    Task { await refreshCurrentSection() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh")
+            }
+        }
+        ToolbarItem(placement: .navigation) {
+            if selectedNavigationItem == .queue {
+                Button {
+                    NotificationCenter.default.post(name: .scrollToCurrentTrack, object: nil)
+                } label: {
+                    Image(systemName: "arrow.down.to.line")
+                }
+                .help("Scroll to Current Track")
+            }
+        }
     }
 
     private func performSearch() {
@@ -291,6 +317,67 @@ struct LoggedInView: View {
                         }
                     }
             }
+        }
+    }
+
+    /// Whether the current section supports refresh
+    private var canRefreshCurrentSection: Bool {
+        switch selectedNavigationItem {
+        case .playlists, .albums, .artists, .favorites, .speakers, .queue:
+            true
+        default:
+            false
+        }
+    }
+
+    /// Refresh data for the current section (clears store and fetches fresh)
+    private func refreshCurrentSection() async {
+        let token = await session.validAccessToken()
+
+        switch selectedNavigationItem {
+        case .playlists:
+            let previousSelection = selectedPlaylistId
+            store.playlistsPagination.reset()
+            store.setUserPlaylistIds([])
+            try? await playlistService.loadUserPlaylists(accessToken: token, forceRefresh: true)
+            restoreOrSelectFirst(previous: previousSelection, available: store.userPlaylistIds, selection: &selectedPlaylistId)
+
+        case .albums:
+            let previousSelection = selectedAlbumId
+            store.albumsPagination.reset()
+            store.setUserAlbumIds([])
+            try? await albumService.loadUserAlbums(accessToken: token, forceRefresh: true)
+            restoreOrSelectFirst(previous: previousSelection, available: store.userAlbumIds, selection: &selectedAlbumId)
+
+        case .artists:
+            let previousSelection = selectedArtistId
+            store.artistsPagination.reset()
+            store.setUserArtistIds([])
+            try? await artistService.loadUserArtists(accessToken: token, forceRefresh: true)
+            restoreOrSelectFirst(previous: previousSelection, available: store.userArtistIds, selection: &selectedArtistId)
+
+        case .favorites:
+            store.favoritesPagination.reset()
+            store.setSavedTrackIds([])
+            try? await trackService.loadFavorites(accessToken: token, forceRefresh: true)
+
+        case .speakers:
+            await deviceService.loadDevices(accessToken: token)
+
+        case .queue:
+            await SpotifyPlayer.refreshQueue()
+
+        default:
+            break
+        }
+    }
+
+    /// Restore previous selection if still available, otherwise select first item
+    private func restoreOrSelectFirst(previous: String?, available: [String], selection: inout String?) {
+        if let previous, available.contains(previous) {
+            selection = previous
+        } else {
+            selection = available.first
         }
     }
 
