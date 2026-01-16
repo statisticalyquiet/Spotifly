@@ -710,6 +710,17 @@ enum SpotifyPlayer {
         }
     }
 
+    /// Adds a track to the queue via Spirc.
+    /// - Parameter trackUri: The Spotify track URI to add to the queue
+    static func addToQueue(trackUri: String) throws {
+        let result = trackUri.withCString { ptr in
+            spotifly_add_to_queue(ptr)
+        }
+        guard result == 0 else {
+            throw SpotifyPlayerError.playbackFailed
+        }
+    }
+
     // MARK: - Playback Settings
 
     /// Streaming bitrate options

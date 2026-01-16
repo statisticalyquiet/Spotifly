@@ -1340,3 +1340,45 @@ pub extern "C" fn spotifly_is_spirc_ready() -> i32 {
         0
     }
 }
+
+/// Adds a track to the queue.
+/// Returns 0 on success, -1 on error.
+#[no_mangle]
+pub extern "C" fn spotifly_add_to_queue(track_uri: *const c_char) -> i32 {
+    if track_uri.is_null() {
+        debug_println!("Add to queue error: track_uri is null");
+        return -1;
+    }
+
+    let uri_str = unsafe {
+        match CStr::from_ptr(track_uri).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                debug_println!("Add to queue error: invalid track_uri string");
+                return -1;
+            }
+        }
+    };
+
+    debug_println!("[Spotifly] spotifly_add_to_queue called: {}", uri_str);
+
+    let spirc_guard = SPIRC.lock().unwrap();
+    match spirc_guard.as_ref() {
+        Some(spirc) => {
+            match spirc.add_to_queue(uri_str) {
+                Ok(_) => {
+                    debug_println!("[Spotifly] add_to_queue succeeded");
+                    0
+                }
+                Err(_e) => {
+                    debug_println!("Add to queue error: {:?}", e);
+                    -1
+                }
+            }
+        }
+        None => {
+            debug_println!("Add to queue error: Spirc not initialized");
+            -1
+        }
+    }
+}
