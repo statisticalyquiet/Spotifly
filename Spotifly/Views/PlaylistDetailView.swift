@@ -367,7 +367,7 @@ struct PlaylistDetailView: View {
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
         .padding(.horizontal)
-        .padding(.bottom, 80)
+        .padding(.bottom, 160)
     }
 
     private func editTrackRowView(track: Track) -> some View {
@@ -415,6 +415,7 @@ struct PlaylistDetailView: View {
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
         .padding(.horizontal)
+        .padding(.bottom, 100)
     }
 
     @ViewBuilder
@@ -437,6 +438,7 @@ struct PlaylistDetailView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .shadow(radius: 8)
             .padding()
+            .padding(.bottom, 80)
         }
     }
 

@@ -241,7 +241,7 @@ struct ArtistDetailView: View {
                     }
                 }
             }
-            .padding(.bottom, 24)
+            .padding(.bottom, 100)
         }
     }
 

@@ -251,6 +251,7 @@ struct AlbumDetailView: View {
                     .background(Color(NSColor.controlBackgroundColor))
                     .cornerRadius(8)
                     .padding(.horizontal)
+                    .padding(.bottom, 100)
                 }
             }
         }
