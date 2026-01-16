@@ -74,10 +74,8 @@ final class PlaybackViewModel {
         didSet {
             // Skip applying to Spirc if this change came from a remote volume callback
             guard !isSettingVolumeLocally else { return }
-            // Only apply volume if player is initialized (mixer is ready)
-            if isInitialized {
-                SpotifyPlayer.setVolume(volume)
-            }
+            // Debounce volume changes to avoid flooding Spirc with requests
+            debounceVolumeChange()
             saveVolume()
         }
     }
@@ -93,6 +91,8 @@ final class PlaybackViewModel {
     private var loadingSubscription: AnyCancellable?
     /// Flag to prevent feedback loop when we set volume locally
     private var isSettingVolumeLocally = false
+    /// Debounce task for volume changes
+    private var volumeDebounceTask: Task<Void, Never>?
     /// Token provider for reinitialization after session disconnect
     private var tokenProvider: (@Sendable () async -> String)?
 
@@ -726,5 +726,27 @@ final class PlaybackViewModel {
 
     private func saveVolume() {
         UserDefaults.standard.set(volume, forKey: "playbackVolume")
+    }
+
+    /// Debounce volume changes to avoid flooding Spirc with rapid requests
+    private func debounceVolumeChange() {
+        // Cancel any pending volume update
+        volumeDebounceTask?.cancel()
+
+        // Capture current volume value
+        let newVolume = volume
+
+        // Schedule debounced update (50ms delay)
+        volumeDebounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+
+            // Check if task was cancelled
+            guard !Task.isCancelled else { return }
+
+            // Only apply volume if player is initialized (mixer is ready)
+            if isInitialized {
+                SpotifyPlayer.setVolume(newVolume)
+            }
+        }
     }
 }
