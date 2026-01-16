@@ -246,13 +246,16 @@ private nonisolated func handleStateUpdateCallback() {
     #endif
 
     // Launch async task to fetch queue
+    // Add a small delay to let Spotify's servers process the state change
     Task {
+        try? await Task.sleep(for: .milliseconds(300))
         await fetchAndEmitQueueState()
     }
 }
 
 /// Fetches queue from Spotify Web API and emits via queueSubject
-private func fetchAndEmitQueueState() async {
+/// - Parameter retryOnEmpty: If true and queue is empty but has current track, retry after delay
+private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
     guard let tokenProvider = stateUpdateTokenProvider else {
         #if DEBUG
             print("[SpotifyPlayer] No token provider set for queue fetch")
@@ -305,6 +308,16 @@ private func fetchAndEmitQueueState() async {
         #if DEBUG
             print("[SpotifyPlayer] Queue fetched from Web API: current=\(currentTrack?.trackName ?? "none"), next=\(nextTracks.count) tracks")
         #endif
+
+        // If we have a current track but empty queue, retry after delay (device activation settling)
+        if retryOnEmpty, currentTrack != nil, nextTracks.isEmpty {
+            #if DEBUG
+                print("[SpotifyPlayer] Queue empty with current track - retrying after delay")
+            #endif
+            try? await Task.sleep(for: .milliseconds(500))
+            await fetchAndEmitQueueState(retryOnEmpty: false)
+            return
+        }
 
         // Also emit playback state if we have a current track
         if let current = response.currentlyPlaying {
