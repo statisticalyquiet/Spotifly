@@ -417,15 +417,17 @@ private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
 
         // Also emit playback state if we have a current track
         if let current = response.currentlyPlaying {
+            // Preserve positionMs and shuffle from previous state (not available from queue endpoint)
+            let previousState = playbackStateSubject.value
             let playbackState = PlaybackState(
                 isPlaying: true, // Assume playing since track changed
                 isPaused: false,
                 trackUri: current.uri,
-                positionMs: 0, // Not available from queue endpoint
+                positionMs: previousState?.positionMs ?? 0,
                 durationMs: Int64(current.durationMs),
-                shuffle: false, // Not available from queue endpoint
-                repeatTrack: false,
-                repeatContext: false,
+                shuffle: previousState?.shuffle ?? false,
+                repeatTrack: previousState?.repeatTrack ?? false,
+                repeatContext: previousState?.repeatContext ?? false,
             )
             playbackStateSubject.send(playbackState)
         }
