@@ -211,8 +211,8 @@ struct NowPlayingBarView: View {
                     playbackViewModel.resume()
                 }
             } label: {
-                Image(systemName: playbackViewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.title2)
+                Image(systemName: playbackViewModel.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.title)
             }
             .buttonStyle(.plain)
 
