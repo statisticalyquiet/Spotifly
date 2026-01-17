@@ -188,36 +188,23 @@ struct LoggedInView: View {
 
     @ViewBuilder
     private var mainLayoutView: some View {
-        if needsThreeColumnLayout {
-            threeColumnLayout
-        } else {
-            twoColumnLayout
-        }
-    }
-
-    @ViewBuilder
-    private var threeColumnLayout: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebarView()
-        } content: {
-            contentView()
-                .navigationSplitViewColumnWidth(min: 300, ideal: 450, max: 600)
-        } detail: {
-            detailView()
-        }
-        .navigationSplitViewStyle(.automatic)
-        .searchable(text: $searchText, isPresented: $searchFieldFocused)
-        .onSubmit(of: .search) { performSearch() }
-        .onChange(of: searchText) { _, newValue in handleSearchTextChange(newValue) }
-        .toolbar { refreshToolbarItem }
-    }
-
-    @ViewBuilder
-    private var twoColumnLayout: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebarView()
-        } detail: {
-            contentView()
+        Group {
+            if needsThreeColumnLayout {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    sidebarView()
+                } content: {
+                    contentView()
+                        .navigationSplitViewColumnWidth(min: 300, ideal: 450, max: 600)
+                } detail: {
+                    detailView()
+                }
+            } else {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    sidebarView()
+                } detail: {
+                    contentView()
+                }
+            }
         }
         .navigationSplitViewStyle(.automatic)
         .searchable(text: $searchText, isPresented: $searchFieldFocused)
