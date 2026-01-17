@@ -130,6 +130,7 @@ struct QueueListView: View {
                     }
                 }
             }
+            .contentMargins(.bottom, 100)
             .onAppear { scrollProxy = proxy }
         }
     }

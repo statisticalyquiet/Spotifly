@@ -109,6 +109,7 @@ struct SpeakersView: View {
                     }
                 }
                 .listStyle(.inset)
+                .contentMargins(.bottom, 100)
             }
         }
         .task {

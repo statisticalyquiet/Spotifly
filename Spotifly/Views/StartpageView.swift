@@ -50,6 +50,7 @@ struct StartpageView: View {
             }
             .padding(.vertical)
         }
+        .contentMargins(.bottom, 100)
         .refreshable {
             let token = await session.validAccessToken()
             if showTopArtists {
