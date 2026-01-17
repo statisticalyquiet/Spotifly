@@ -12,12 +12,12 @@ import SwiftUI
 final class TrackLookupViewModel {
     var spotifyURI: String = ""
     var isLoading = false
-    var trackMetadata: TrackMetadata?
+    var track: Track?
     var errorMessage: String?
 
     func clearInput() {
         spotifyURI = ""
-        trackMetadata = nil
+        track = nil
         errorMessage = nil
     }
 
@@ -31,12 +31,12 @@ final class TrackLookupViewModel {
         if let trackId = SpotifyAPI.parseTrackURI(spotifyURI) {
             isLoading = true
             errorMessage = nil
-            trackMetadata = nil
+            track = nil
 
             Task {
                 do {
-                    let metadata = try await SpotifyAPI.fetchTrackMetadata(trackId: trackId, accessToken: accessToken)
-                    self.trackMetadata = metadata
+                    let apiTrack = try await SpotifyAPI.fetchTrack(trackId: trackId, accessToken: accessToken)
+                    self.track = Track(from: apiTrack)
                     self.isLoading = false
                 } catch {
                     self.errorMessage = error.localizedDescription
@@ -46,7 +46,7 @@ final class TrackLookupViewModel {
         } else {
             // For non-track URIs (album/playlist/artist), we won't fetch metadata
             // but we'll allow playback
-            trackMetadata = nil
+            track = nil
         }
     }
 }

@@ -11,9 +11,9 @@ import os
 extension SpotifyAPI {
     // MARK: - Single Track
 
-    /// Fetches track metadata from Spotify Web API
-    static func fetchTrackMetadata(trackId: String, accessToken: String) async throws -> TrackMetadata {
-        let urlString = "\(baseURL)/tracks/\(trackId)?fields=id,name,duration_ms,artists(name),album(name,images),preview_url"
+    /// Fetches a single track from Spotify Web API
+    static func fetchTrack(trackId: String, accessToken: String) async throws -> APITrack {
+        let urlString = "\(baseURL)/tracks/\(trackId)"
         #if DEBUG
             apiLogger.debug("[GET] \(urlString)")
         #endif
@@ -35,7 +35,7 @@ extension SpotifyAPI {
         case 200:
             do {
                 let track = try JSONDecoder().decode(TrackCodable.self, from: data)
-                return track.toTrackMetadata()
+                return track.toAPITrack()
             } catch {
                 throw SpotifyAPIError.invalidResponse
             }

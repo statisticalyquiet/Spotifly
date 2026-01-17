@@ -7,29 +7,6 @@
 
 import SwiftUI
 
-/// Data needed to display a track row
-struct TrackRowData: Identifiable {
-    let id: String
-    let uri: String
-    let name: String
-    let artistName: String
-    let albumArtURL: String?
-    let durationMs: Int
-    let trackNumber: Int? // Optional - only shown in album views
-    let albumId: String? // For navigation to album
-    let artistId: String? // For navigation to artist
-    let externalUrl: String? // Web URL for sharing
-
-    var durationFormatted: String {
-        formatTrackTime(milliseconds: durationMs)
-    }
-
-    /// Extracts the track ID for API calls (handles both plain IDs and URIs)
-    var trackId: String {
-        SpotifyAPI.parseTrackURI(id) ?? id
-    }
-}
-
 /// Double-tap behavior for TrackRow
 enum TrackRowDoubleTapBehavior {
     case playTrack // Play just this track
@@ -37,7 +14,7 @@ enum TrackRowDoubleTapBehavior {
 
 /// Reusable track row view
 struct TrackRow: View {
-    let track: TrackRowData
+    let track: Track
     let showTrackNumber: Bool // Show track number instead of index
     let index: Int? // Optional index for queue
     let isCurrentTrack: Bool
@@ -61,11 +38,11 @@ struct TrackRow: View {
 
     /// Favorite status from the store (single source of truth)
     private var isFavorited: Bool {
-        store.isFavorite(track.trackId)
+        store.isFavorite(track.id)
     }
 
     init(
-        track: TrackRowData,
+        track: Track,
         showTrackNumber: Bool = false,
         index: Int? = nil,
         currentlyPlayingURI: String?,
@@ -115,8 +92,8 @@ struct TrackRow: View {
             .frame(width: 30, alignment: showTrackNumber ? .trailing : .center)
 
             // Album art (if available)
-            if let albumArtURL = track.albumArtURL, !albumArtURL.isEmpty, let url = URL(string: albumArtURL) {
-                AsyncImage(url: url) { phase in
+            if let imageURL = track.imageURL {
+                AsyncImage(url: imageURL) { phase in
                     switch phase {
                     case .empty:
                         ProgressView()
@@ -252,7 +229,7 @@ struct TrackRow: View {
             do {
                 let token = await session.validAccessToken()
                 try await trackService.toggleFavorite(
-                    trackId: track.trackId,
+                    trackId: track.id,
                     accessToken: token,
                 )
             } catch {
@@ -284,7 +261,7 @@ struct TrackRow: View {
                 // Add the track to the new playlist
                 try await playlistService.addTracksToPlaylist(
                     playlistId: newPlaylist.id,
-                    trackIds: [track.trackId],
+                    trackIds: [track.id],
                     accessToken: token,
                 )
 
@@ -305,38 +282,23 @@ struct TrackRow: View {
     }
 }
 
-// MARK: - Conversions from different track types
+// MARK: - QueueItem to Track Conversion
 
 extension QueueItem {
-    func toTrackRowData() -> TrackRowData {
-        TrackRowData(
-            id: uri,
+    /// Convert QueueItem to Track for use with TrackRow and store operations
+    func toTrack() -> Track {
+        Track(
+            id: SpotifyAPI.parseTrackURI(uri) ?? id,
+            name: name,
             uri: uri,
-            name: trackName,
-            artistName: artistName,
-            albumArtURL: albumArtURL,
             durationMs: Int(durationMs),
             trackNumber: nil,
+            externalUrl: externalUrl,
             albumId: albumId,
             artistId: artistId,
-            externalUrl: externalUrl,
-        )
-    }
-}
-
-extension APITrack {
-    func toTrackRowData() -> TrackRowData {
-        TrackRowData(
-            id: id,
-            uri: uri,
-            name: name,
             artistName: artistName,
-            albumArtURL: imageURL?.absoluteString,
-            durationMs: durationMs,
-            trackNumber: trackNumber,
-            albumId: albumId,
-            artistId: artistId,
-            externalUrl: externalUrl,
+            albumName: nil,
+            imageURL: imageURL,
         )
     }
 }

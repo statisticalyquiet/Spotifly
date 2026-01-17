@@ -193,7 +193,7 @@ struct AlbumDetailView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
                             TrackRow(
-                                track: track.toTrackRowData(),
+                                track: track,
                                 showTrackNumber: true,
                                 currentlyPlayingURI: playbackViewModel.currentlyPlayingURI,
                                 playbackViewModel: playbackViewModel,

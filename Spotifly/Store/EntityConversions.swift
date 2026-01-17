@@ -7,26 +7,6 @@
 
 import Foundation
 
-// MARK: - Track to TrackRowData Conversion
-
-extension Track {
-    /// Convert to TrackRowData for use with TrackRow view
-    func toTrackRowData() -> TrackRowData {
-        TrackRowData(
-            id: id,
-            uri: uri,
-            name: name,
-            artistName: artistName,
-            albumArtURL: imageURL?.absoluteString,
-            durationMs: durationMs,
-            trackNumber: trackNumber,
-            albumId: albumId,
-            artistId: artistId,
-            externalUrl: externalUrl,
-        )
-    }
-}
-
 // MARK: - Track Conversions
 
 extension Track {
@@ -59,21 +39,6 @@ extension Track {
         artistName = track.artistName
         self.albumName = albumName
         self.imageURL = imageURL
-    }
-
-    /// Convert from TrackMetadata (single track lookup)
-    init(from metadata: TrackMetadata) {
-        id = metadata.id
-        name = metadata.name
-        uri = "spotify:track:\(metadata.id)"
-        durationMs = metadata.durationMs
-        trackNumber = nil
-        externalUrl = nil
-        albumId = nil
-        artistId = nil
-        artistName = metadata.artistName
-        albumName = metadata.albumName
-        imageURL = metadata.albumImageURL
     }
 }
 
@@ -169,20 +134,5 @@ extension Playlist {
             totalDurationMs: totalDurationMs,
             knownTrackCount: nil, // We have actual tracks
         )
-    }
-}
-
-// MARK: - Device Conversions
-
-extension Device {
-    /// Convert from SpotifyDevice
-    init(from device: SpotifyDevice) {
-        id = device.id
-        name = device.name
-        type = device.type
-        isActive = device.isActive
-        isPrivateSession = device.isPrivateSession
-        isRestricted = device.isRestricted
-        volumePercent = device.volumePercent
     }
 }

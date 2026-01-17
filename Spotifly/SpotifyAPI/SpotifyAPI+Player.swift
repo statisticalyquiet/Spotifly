@@ -35,7 +35,7 @@ extension SpotifyAPI {
         case 200:
             do {
                 let decoded = try JSONDecoder().decode(DevicesCodable.self, from: data)
-                let devices = decoded.devices.compactMap { $0.toSpotifyDevice() }
+                let devices = decoded.devices.compactMap { $0.toDevice() }
                 return DevicesResponse(devices: devices)
             } catch {
                 throw SpotifyAPIError.invalidResponse

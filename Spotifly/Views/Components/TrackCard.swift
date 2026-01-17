@@ -58,7 +58,7 @@ struct TrackCard: View {
         .buttonStyle(.plain)
         .contextMenu {
             TrackContextMenu(
-                track: track.toTrackRowData(),
+                track: track,
                 currentSection: currentSection,
                 selectionId: nil,
                 playbackViewModel: playbackViewModel,

@@ -132,12 +132,12 @@ final class TrackService {
 
     /// Fetch and store a single track by ID
     func fetchTrack(trackId: String, accessToken: String) async throws -> Track {
-        let metadata = try await SpotifyAPI.fetchTrackMetadata(
+        let apiTrack = try await SpotifyAPI.fetchTrack(
             trackId: trackId,
             accessToken: accessToken,
         )
 
-        let track = Track(from: metadata)
+        let track = Track(from: apiTrack)
         store.upsertTrack(track)
         return track
     }

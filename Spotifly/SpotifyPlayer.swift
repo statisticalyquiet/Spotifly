@@ -10,12 +10,13 @@ import Foundation
 import SpotiflyRust
 
 /// Queue item metadata (nonisolated for C callback compatibility)
+/// Field names aligned with Track for consistency
 struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
     nonisolated let id: String // uri
     nonisolated let uri: String
-    nonisolated let trackName: String
+    nonisolated let name: String // Aligned with Track.name (was: trackName)
     nonisolated let artistName: String
-    nonisolated let albumArtURL: String
+    nonisolated let imageURLString: String // Aligned with Track (was: albumArtURL)
     nonisolated let durationMs: UInt32
     nonisolated let albumId: String?
     nonisolated let artistId: String?
@@ -25,13 +26,16 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
         formatTrackTime(milliseconds: Int(durationMs))
     }
 
+    /// Computed property for URL conversion
+    var imageURL: URL? { URL(string: imageURLString) }
+
     /// Memberwise initializer
     nonisolated init(
         id: String,
         uri: String,
-        trackName: String,
+        name: String,
         artistName: String,
-        albumArtURL: String,
+        imageURLString: String,
         durationMs: UInt32,
         albumId: String?,
         artistId: String?,
@@ -39,9 +43,9 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
     ) {
         self.id = id
         self.uri = uri
-        self.trackName = trackName
+        self.name = name
         self.artistName = artistName
-        self.albumArtURL = albumArtURL
+        self.imageURLString = imageURLString
         self.durationMs = durationMs
         self.albumId = albumId
         self.artistId = artistId
@@ -52,13 +56,13 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
     @MainActor init(from track: APITrack) {
         id = track.uri
         uri = track.uri
-        trackName = track.name
+        name = track.name
         artistName = track.artistName
-        albumArtURL = track.imageURL?.absoluteString ?? ""
+        imageURLString = track.imageURL?.absoluteString ?? ""
         durationMs = UInt32(track.durationMs)
         albumId = track.albumId
         artistId = track.artistId
-        externalUrl = track.externalUrl ?? "https://open.spotify.com/track/\(track.id)"
+        externalUrl = track.externalUrl ?? spotifyExternalUrl(type: .track, id: track.id)
     }
 }
 
@@ -369,9 +373,9 @@ private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
             QueueItem(
                 id: track.uri,
                 uri: track.uri,
-                trackName: track.name,
+                name: track.name,
                 artistName: track.artists?.first?.name ?? "Unknown Artist",
-                albumArtURL: track.album?.images?.first?.url ?? "",
+                imageURLString: track.album?.images?.first?.url ?? "",
                 durationMs: UInt32(track.durationMs),
                 albumId: track.album?.id,
                 artistId: track.artists?.first?.id,
@@ -383,9 +387,9 @@ private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
             QueueItem(
                 id: track.uri,
                 uri: track.uri,
-                trackName: track.name,
+                name: track.name,
                 artistName: track.artists?.first?.name ?? "Unknown Artist",
-                albumArtURL: track.album?.images?.first?.url ?? "",
+                imageURLString: track.album?.images?.first?.url ?? "",
                 durationMs: UInt32(track.durationMs),
                 albumId: track.album?.id,
                 artistId: track.artists?.first?.id,
@@ -402,7 +406,7 @@ private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
         queueSubject.send(queueState)
 
         #if DEBUG
-            print("[SpotifyPlayer] Queue fetched from Web API: current=\(currentTrack?.trackName ?? "none"), next=\(nextTracks.count) tracks")
+            print("[SpotifyPlayer] Queue fetched from Web API: current=\(currentTrack?.name ?? "none"), next=\(nextTracks.count) tracks")
         #endif
 
         // If we have a current track but empty queue, retry after delay (device activation settling)
@@ -504,9 +508,9 @@ private nonisolated func parseQueueItem(from dict: [String: Any]) -> QueueItem? 
     return QueueItem(
         id: uri,
         uri: uri,
-        trackName: dict["name"] as? String ?? "",
+        name: dict["name"] as? String ?? "",
         artistName: dict["artist"] as? String ?? "",
-        albumArtURL: dict["image_url"] as? String ?? "",
+        imageURLString: dict["image_url"] as? String ?? "",
         durationMs: (dict["duration_ms"] as? NSNumber)?.uint32Value ?? 0,
         albumId: nil,
         artistId: nil,
@@ -577,10 +581,10 @@ private nonisolated func handleQueueCallback(_ jsonPtr: UnsafePointer<CChar>?) {
         )
 
         #if DEBUG
-            let trackName = state.currentTrack?.trackName ?? "none"
+            let currentName = state.currentTrack?.name ?? "none"
             let nextCount = state.nextTracks.count
             let prevCount = state.previousTracks?.count ?? 0
-            print("[SpotifyPlayer] handleQueueCallback: current='\(trackName)', next=\(nextCount), prev=\(prevCount)")
+            print("[SpotifyPlayer] handleQueueCallback: current='\(currentName)', next=\(nextCount), prev=\(prevCount)")
         #endif
 
         queueSubject.send(state)

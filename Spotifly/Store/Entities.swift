@@ -11,7 +11,7 @@ import Foundation
 // MARK: - Track
 
 /// Unified track entity - single source of truth for all track data.
-/// Constructed from APITrack or TrackMetadata via EntityConversions.
+/// Constructed from APITrack via EntityConversions.
 struct Track: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     let name: String
@@ -31,6 +31,11 @@ struct Track: Identifiable, Sendable, Hashable, Encodable {
 
     var durationFormatted: String {
         formatTrackTime(milliseconds: durationMs)
+    }
+
+    /// Returns externalUrl if available, otherwise generates from ID
+    var externalUrlOrGenerated: String {
+        externalUrl ?? spotifyExternalUrl(type: .track, id: id)
     }
 }
 

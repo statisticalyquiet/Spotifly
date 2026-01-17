@@ -9,7 +9,7 @@ import SwiftUI
 
 /// Reusable context menu content for tracks
 struct TrackContextMenu: View {
-    let track: TrackRowData
+    let track: Track
     let currentSection: NavigationItem
     let selectionId: String?
     @Bindable var playbackViewModel: PlaybackViewModel
@@ -26,7 +26,7 @@ struct TrackContextMenu: View {
 
     /// Favorite status from the store
     private var isFavorited: Bool {
-        store.isFavorite(track.trackId)
+        store.isFavorite(track.id)
     }
 
     var body: some View {
@@ -151,7 +151,7 @@ struct TrackContextMenu: View {
             do {
                 let token = await session.validAccessToken()
                 try await trackService.toggleFavorite(
-                    trackId: track.trackId,
+                    trackId: track.id,
                     accessToken: token,
                 )
             } catch {
@@ -166,7 +166,7 @@ struct TrackContextMenu: View {
                 let token = await session.validAccessToken()
                 try await playlistService.addTracksToPlaylist(
                     playlistId: playlistId,
-                    trackIds: [track.trackId],
+                    trackIds: [track.id],
                     accessToken: token,
                 )
                 onPlaylistAdded?()
@@ -182,7 +182,7 @@ struct TrackContextMenu: View {
 extension TrackContextMenu {
     /// Initialize without playlist dialog support (for context menus)
     init(
-        track: TrackRowData,
+        track: Track,
         currentSection: NavigationItem = .startpage,
         selectionId: String? = nil,
         playbackViewModel: PlaybackViewModel,

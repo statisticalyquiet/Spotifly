@@ -187,20 +187,9 @@ struct RecentlyPlayedResponse: Sendable {
 
 // MARK: - Playback & Connect Types
 
-/// Spotify Connect device
-struct SpotifyDevice: Sendable, Identifiable {
-    let id: String
-    let isActive: Bool
-    let isPrivateSession: Bool
-    let isRestricted: Bool
-    let name: String
-    let type: String // "Computer", "Smartphone", "Speaker", etc.
-    let volumePercent: Int?
-}
-
 /// Devices response wrapper
 struct DevicesResponse: Sendable {
-    let devices: [SpotifyDevice]
+    let devices: [Device]
 }
 
 // MARK: - User Top Items
@@ -210,23 +199,6 @@ enum TopItemsTimeRange: String, Sendable {
     case longTerm = "long_term" // ~1 year
     case mediumTerm = "medium_term" // ~6 months (default)
     case shortTerm = "short_term" // ~4 weeks
-}
-
-// MARK: - Legacy Track Types (to be removed after migration)
-
-/// Track metadata from single track lookup
-struct TrackMetadata: Sendable {
-    let id: String
-    let albumImageURL: URL?
-    let albumName: String
-    let artistName: String
-    let durationMs: Int
-    let name: String
-    let previewURL: URL?
-
-    var durationFormatted: String {
-        formatTrackTime(milliseconds: durationMs)
-    }
 }
 
 // MARK: - Codable Response Types (Internal)
@@ -406,19 +378,6 @@ struct TrackCodable: Decodable {
             uri: uri,
         )
     }
-
-    func toTrackMetadata() -> TrackMetadata {
-        let artistNames = artists?.compactMap(\.name).joined(separator: ", ") ?? "Unknown Artist"
-        return TrackMetadata(
-            id: id,
-            albumImageURL: (album?.images?.first?.url).flatMap { URL(string: $0) },
-            albumName: album?.name ?? "Unknown Album",
-            artistName: artistNames,
-            durationMs: durationMs,
-            name: name,
-            previewURL: previewUrl.flatMap { URL(string: $0) },
-        )
-    }
 }
 
 // MARK: Playlist Codable
@@ -493,15 +452,15 @@ struct DeviceCodable: Decodable {
         case volumePercent = "volume_percent"
     }
 
-    func toSpotifyDevice() -> SpotifyDevice? {
+    func toDevice() -> Device? {
         guard let id else { return nil }
-        return SpotifyDevice(
+        return Device(
             id: id,
+            name: name,
+            type: type,
             isActive: isActive ?? false,
             isPrivateSession: isPrivateSession ?? false,
             isRestricted: isRestricted ?? false,
-            name: name,
-            type: type,
             volumePercent: volumePercent,
         )
     }

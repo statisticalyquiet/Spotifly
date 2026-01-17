@@ -293,7 +293,7 @@ struct PlaylistDetailView: View {
     @ViewBuilder
     private func trackRowView(track: Track, index: Int) -> some View {
         let row = TrackRow(
-            track: track.toTrackRowData(),
+            track: track,
             index: index,
             currentlyPlayingURI: playbackViewModel.currentlyPlayingURI,
             playbackViewModel: playbackViewModel,

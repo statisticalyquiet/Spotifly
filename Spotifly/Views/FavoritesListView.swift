@@ -58,7 +58,7 @@ struct FavoritesListView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(store.favoriteTracks.enumerated()), id: \.element.id) { index, track in
                             TrackRow(
-                                track: track.toTrackRowData(),
+                                track: track,
                                 index: index,
                                 currentlyPlayingURI: playbackViewModel.currentlyPlayingURI,
                                 playbackViewModel: playbackViewModel,

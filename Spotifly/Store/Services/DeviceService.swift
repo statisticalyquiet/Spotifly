@@ -26,11 +26,10 @@ final class DeviceService {
 
         do {
             let response = try await SpotifyAPI.fetchAvailableDevices(accessToken: accessToken)
-            let devices = response.devices.map { Device(from: $0) }
-            store.upsertDevices(devices)
+            store.upsertDevices(response.devices)
 
             // Track active device ID
-            if let activeDevice = devices.first(where: { $0.isActive }) {
+            if let activeDevice = response.devices.first(where: { $0.isActive }) {
                 store.activeDeviceId = activeDevice.id
             } else {
                 store.activeDeviceId = nil

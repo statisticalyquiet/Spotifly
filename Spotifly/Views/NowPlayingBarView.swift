@@ -41,28 +41,6 @@ struct NowPlayingBarView: View {
         return store.tracks[trackId]
     }
 
-    /// Current track data for the context menu
-    private var currentTrackData: TrackRowData? {
-        guard let track = currentTrack,
-              let uri = playbackViewModel.currentTrackUri
-        else {
-            return nil
-        }
-
-        return TrackRowData(
-            id: track.id,
-            uri: uri,
-            name: track.name,
-            artistName: track.artistName,
-            albumArtURL: track.imageURL?.absoluteString,
-            durationMs: track.durationMs,
-            trackNumber: track.trackNumber,
-            albumId: track.albumId,
-            artistId: track.artistId,
-            externalUrl: track.externalUrl,
-        )
-    }
-
     // Fixed dimensions for the now playing bar (in points)
     private let barWidth: CGFloat = 700
     private let barHeight: CGFloat = 60
@@ -374,7 +352,7 @@ struct NowPlayingBarView: View {
 
     @ViewBuilder
     private var trackMenu: some View {
-        if let track = currentTrackData {
+        if let track = currentTrack {
             Menu {
                 TrackContextMenu(
                     track: track,
@@ -416,7 +394,7 @@ struct NowPlayingBarView: View {
 
     private func createAndAddToPlaylist(name: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmedName.isEmpty, let track = currentTrackData else { return }
+        guard !trimmedName.isEmpty, let track = currentTrack else { return }
 
         Task {
             do {
@@ -432,7 +410,7 @@ struct NowPlayingBarView: View {
                 // Add the track to the new playlist
                 try await playlistService.addTracksToPlaylist(
                     playlistId: newPlaylist.id,
-                    trackIds: [track.trackId],
+                    trackIds: [track.id],
                     accessToken: token,
                 )
 

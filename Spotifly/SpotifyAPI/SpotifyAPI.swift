@@ -10,6 +10,20 @@ import os.log
 
 let apiLogger = Logger(subsystem: "com.spotifly.app", category: "SpotifyAPI")
 
+/// Spotify item types for generating external URLs
+enum SpotifyItemType: String {
+    case track
+    case album
+    case artist
+    case playlist
+    case user
+}
+
+/// Generates a Spotify external URL from item type and ID
+func spotifyExternalUrl(type: SpotifyItemType, id: String) -> String {
+    "https://open.spotify.com/\(type.rawValue)/\(id)"
+}
+
 /// Spotify Web API client
 enum SpotifyAPI {
     static let baseURL = "https://api.spotify.com/v1"

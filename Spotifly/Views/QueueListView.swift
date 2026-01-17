@@ -112,9 +112,8 @@ struct QueueListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(allTracks.enumerated()), id: \.offset) { index, track in
-                        let trackData = track.toTrackRowData()
                         TrackRow(
-                            track: trackData,
+                            track: track,
                             index: index,
                             currentlyPlayingURI: playbackViewModel.currentlyPlayingURI,
                             currentIndex: currentIndex,
