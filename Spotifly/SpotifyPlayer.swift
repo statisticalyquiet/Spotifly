@@ -105,8 +105,23 @@ struct QueueChangedNotification: Sendable {
     nonisolated let trackUri: String
 }
 
+/// Connection state from librespot (nonisolated for C callback compatibility)
+struct LibrespotConnectionState: Sendable, Equatable, Encodable {
+    nonisolated let sessionConnected: Bool
+    nonisolated let sessionConnectionId: String?
+    nonisolated let spircReady: Bool
+    nonisolated let deviceId: String?
+    nonisolated let deviceName: String
+    nonisolated let reconnectAttempt: UInt32
+    nonisolated let lastError: String?
+    nonisolated let connectedSinceMs: UInt64?
+}
+
 /// Global subject for queue changed notifications (nonisolated for C callback access)
 private nonisolated(unsafe) let queueChangedSubject = PassthroughSubject<QueueChangedNotification, Never>()
+
+/// Global subject for connection state updates (nonisolated for C callback access)
+private nonisolated(unsafe) let connectionStateSubject = CurrentValueSubject<LibrespotConnectionState?, Never>(nil)
 
 /// Token provider for fetching queue from Web API (set during initialize)
 private nonisolated(unsafe) var stateUpdateTokenProvider: (@Sendable () async -> String)?
@@ -194,6 +209,55 @@ private nonisolated func handleLoadingCallback(_ jsonPtr: UnsafePointer<CChar>?)
 private nonisolated func registerQueueChangedCallback() {
     spotifly_register_queue_changed_callback { jsonPtr in
         handleQueueChangedCallback(jsonPtr)
+    }
+}
+
+/// Registers the connection state callback with Rust (fires on state changes)
+private nonisolated func registerConnectionStateCallback() {
+    spotifly_register_connection_state_callback { jsonPtr in
+        handleConnectionStateCallback(jsonPtr)
+    }
+}
+
+/// C callback for connection state updates from Rust
+private nonisolated func handleConnectionStateCallback(_ jsonPtr: UnsafePointer<CChar>?) {
+    guard let jsonPtr else {
+        #if DEBUG
+            print("[SpotifyPlayer] handleConnectionStateCallback: jsonPtr is nil")
+        #endif
+        return
+    }
+
+    let jsonString = String(cString: jsonPtr)
+    #if DEBUG
+        print("[SpotifyPlayer] Connection state callback: \(jsonString)")
+    #endif
+
+    guard let data = jsonString.data(using: .utf8) else {
+        return
+    }
+
+    do {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        let state = LibrespotConnectionState(
+            sessionConnected: json["session_connected"] as? Bool ?? false,
+            sessionConnectionId: json["session_connection_id"] as? String,
+            spircReady: json["spirc_ready"] as? Bool ?? false,
+            deviceId: json["device_id"] as? String,
+            deviceName: json["device_name"] as? String ?? "Spotifly",
+            reconnectAttempt: (json["reconnect_attempt"] as? NSNumber)?.uint32Value ?? 0,
+            lastError: json["last_error"] as? String,
+            connectedSinceMs: (json["connected_since_ms"] as? NSNumber)?.uint64Value,
+        )
+
+        connectionStateSubject.send(state)
+    } catch {
+        #if DEBUG
+            print("[SpotifyPlayer] Failed to parse connection state JSON: \(error)")
+        #endif
     }
 }
 
@@ -581,6 +645,7 @@ enum SpotifyPlayer {
         registerQueueChangedCallback()
         registerSessionDisconnectedCallback()
         registerSessionConnectedCallback()
+        registerConnectionStateCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
@@ -646,6 +711,38 @@ enum SpotifyPlayer {
     /// Returns whether the session is currently connected and ready for playback commands.
     static var isSessionConnected: Bool {
         spotifly_is_session_connected() == 1
+    }
+
+    /// Returns a publisher for connection state updates.
+    /// Subscribe to this to update the connection status dashboard.
+    static var connectionState: AnyPublisher<LibrespotConnectionState?, Never> {
+        connectionStateSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns the current connection state synchronously.
+    /// Use this for initial UI display or one-time queries.
+    static func getConnectionState() -> LibrespotConnectionState? {
+        let ptr = spotifly_get_connection_state()
+        guard ptr != nil else { return nil }
+        defer { spotifly_free_string(ptr) }
+
+        let jsonString = String(cString: ptr!)
+        guard let data = jsonString.data(using: String.Encoding.utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+
+        return LibrespotConnectionState(
+            sessionConnected: json["session_connected"] as? Bool ?? false,
+            sessionConnectionId: json["session_connection_id"] as? String,
+            spircReady: json["spirc_ready"] as? Bool ?? false,
+            deviceId: json["device_id"] as? String,
+            deviceName: json["device_name"] as? String ?? "Spotifly",
+            reconnectAttempt: (json["reconnect_attempt"] as? NSNumber)?.uint32Value ?? 0,
+            lastError: json["last_error"] as? String,
+            connectedSinceMs: (json["connected_since_ms"] as? NSNumber)?.uint64Value,
+        )
     }
 
     /// Refreshes the queue from Spotify Web API.

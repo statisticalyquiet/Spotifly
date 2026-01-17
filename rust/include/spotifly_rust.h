@@ -147,6 +147,18 @@ void spotifly_register_session_connected_callback(SessionConnectedCallback callb
 /// Use this to check if playback commands will be accepted.
 int32_t spotifly_is_session_connected(void);
 
+/// Callback function type for connection state change notifications.
+/// Receives a JSON string containing full connection state.
+typedef void (*ConnectionStateCallback)(const char* state_json);
+
+/// Registers a callback to receive connection state change notifications.
+/// Called whenever the connection state changes (connect, disconnect, error, etc.).
+void spotifly_register_connection_state_callback(ConnectionStateCallback callback);
+
+/// Returns the current connection state as a JSON string.
+/// Caller must free the returned string using spotifly_free_string().
+char* spotifly_get_connection_state(void);
+
 /// Skips to the next track in the queue.
 /// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_next(void);

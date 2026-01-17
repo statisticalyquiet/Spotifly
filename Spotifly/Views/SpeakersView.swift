@@ -100,6 +100,13 @@ struct SpeakersView: View {
                             }
                         }
                     #endif
+
+                    // Librespot Connection Status
+                    Section {
+                        ConnectionStatusView()
+                    } header: {
+                        Text("Librespot Connection")
+                    }
                 }
                 .listStyle(.inset)
             }

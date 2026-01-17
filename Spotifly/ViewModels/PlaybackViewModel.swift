@@ -102,6 +102,11 @@ final class PlaybackViewModel {
     private var pendingResumePositionMs: UInt32 = 0
     private var pendingResumeWasPlaying: Bool = false
 
+    /// Reconnection state for exponential backoff
+    private var reconnectAttempt: Int = 0
+    private var reconnectTask: Task<Void, Never>?
+    private let maxReconnectAttempts = 10
+
     private init() {
         setupPlaybackStateSubscription()
         setupVolumeSubscription()
@@ -517,6 +522,18 @@ final class PlaybackViewModel {
             }
     }
 
+    /// Reconnection delays: 0s, 2s, 5s, 10s, 30s, 30s...
+    /// First attempt is immediate to recover within audio buffer (~5s)
+    private func reconnectDelay(attempt: Int) -> TimeInterval {
+        switch attempt {
+        case 0: 0 // Immediate - try to beat the buffer
+        case 1: 2 // Quick retry
+        case 2: 5 // Still within reasonable gap
+        case 3: 10 // Network might be recovering
+        default: 30 // Back off for persistent issues
+        }
+    }
+
     /// Subscribe to session disconnection events from Spirc
     /// Automatically reinitializes the player with a fresh token when the channel closes
     private func setupSessionDisconnectedSubscription() {
@@ -545,11 +562,54 @@ final class PlaybackViewModel {
                 isInitialized = false
                 // Don't set isPlaying = false yet - keep UI showing playing state during reconnect
 
-                // If we have a token provider, reinitialize automatically
-                if let tokenProvider {
-                    Task { @MainActor in
+                // Cancel any existing reconnect task
+                reconnectTask?.cancel()
+
+                // Start exponential backoff reconnection loop
+                guard let tokenProvider else { return }
+
+                reconnectTask = Task { @MainActor [weak self] in
+                    guard let self else { return }
+
+                    while reconnectAttempt < maxReconnectAttempts {
+                        // Check for cancellation
+                        if Task.isCancelled { break }
+
+                        let delay = reconnectDelay(attempt: reconnectAttempt)
+                        #if DEBUG
+                            print("[PlaybackViewModel] Reconnect attempt \(reconnectAttempt + 1)/\(maxReconnectAttempts), delay: \(delay)s")
+                        #endif
+
+                        // Wait for delay (if any)
+                        if delay > 0 {
+                            try? await Task.sleep(for: .seconds(delay))
+                        }
+
+                        // Check for cancellation again
+                        if Task.isCancelled { break }
+
+                        // Attempt reconnection
                         let token = await tokenProvider()
-                        await self.initializeIfNeeded(accessToken: token)
+                        await initializeIfNeeded(accessToken: token)
+
+                        // If initialized, we're done - SessionConnected callback will handle the rest
+                        if isInitialized {
+                            #if DEBUG
+                                print("[PlaybackViewModel] Reconnection successful on attempt \(reconnectAttempt + 1)")
+                            #endif
+                            break
+                        }
+
+                        reconnectAttempt += 1
+                    }
+
+                    // If we exhausted attempts, give up and update UI
+                    if reconnectAttempt >= maxReconnectAttempts {
+                        #if DEBUG
+                            print("[PlaybackViewModel] Reconnection failed after \(maxReconnectAttempts) attempts")
+                        #endif
+                        isPlaying = false
+                        pendingResumeWasPlaying = false
                     }
                 }
             }
@@ -562,6 +622,11 @@ final class PlaybackViewModel {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self else { return }
+
+                // Reset reconnect state on successful connection
+                reconnectAttempt = 0
+                reconnectTask?.cancel()
+                reconnectTask = nil
 
                 // Check if we have pending playback to resume
                 guard pendingResumeWasPlaying,

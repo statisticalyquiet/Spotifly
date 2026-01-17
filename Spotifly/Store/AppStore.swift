@@ -105,6 +105,11 @@ final class AppStore {
     var devicesErrorMessage: String?
     var activeDeviceId: String? // Tracks which device is currently active
 
+    // MARK: - Connection State (from librespot)
+
+    /// Current connection state from librespot
+    private(set) var connectionState: LibrespotConnectionState?
+
     // MARK: - Computed Properties (Derived State)
 
     /// User's playlists in display order
@@ -202,6 +207,28 @@ final class AppStore {
     /// Active device (if any)
     var activeDevice: Device? {
         devices.values.first { $0.isActive }
+    }
+
+    /// Own device info computed from connection state
+    var ownDevice: OwnDeviceInfo? {
+        guard let state = connectionState,
+              let deviceId = state.deviceId
+        else { return nil }
+
+        let connectedSince: Date? = if let ms = state.connectedSinceMs {
+            Date(timeIntervalSince1970: Double(ms) / 1000.0)
+        } else {
+            nil
+        }
+
+        return OwnDeviceInfo(
+            id: deviceId,
+            name: state.deviceName,
+            isConnected: state.sessionConnected,
+            connectionId: state.sessionConnectionId,
+            connectedSince: connectedSince,
+            reconnectAttempts: state.reconnectAttempt,
+        )
     }
 
     // MARK: - Entity Mutations
@@ -461,6 +488,13 @@ final class AppStore {
         nextTrackURIs = next
     }
 
+    // MARK: - Connection State Actions
+
+    /// Update connection state from librespot
+    func setConnectionState(_ state: LibrespotConnectionState?) {
+        connectionState = state
+    }
+
     // MARK: - Debug
 
     #if DEBUG
@@ -497,6 +531,9 @@ final class AppStore {
                 let nextTrackURIs: [String]
 
                 let activeDeviceId: String?
+
+                let connectionState: LibrespotConnectionState?
+                let ownDevice: OwnDeviceInfo?
             }
 
             let snapshot = StoreSnapshot(
@@ -523,6 +560,8 @@ final class AppStore {
                 previousTrackURIs: previousTrackURIs,
                 nextTrackURIs: nextTrackURIs,
                 activeDeviceId: activeDeviceId,
+                connectionState: connectionState,
+                ownDevice: ownDevice,
             )
 
             let encoder = JSONEncoder()

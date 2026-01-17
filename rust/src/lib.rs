@@ -79,6 +79,13 @@ static SESSION_CONNECTION_STATE: Lazy<Mutex<SessionConnectionState>> =
 static POSITION_MS: AtomicU32 = AtomicU32::new(0);
 static POSITION_TIMESTAMP_MS: AtomicU64 = AtomicU64::new(0);
 
+// Connection state tracking - for transparency dashboard
+static RECONNECT_ATTEMPT: AtomicU32 = AtomicU32::new(0);
+static CONNECTED_SINCE_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+static CONNECTION_STATE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
+    Lazy::new(|| Mutex::new(None));
+
 // Playback settings (applied on player init)
 // Bitrate: 0 = 96kbps, 1 = 160kbps (default), 2 = 320kbps
 static BITRATE_SETTING: AtomicU8 = AtomicU8::new(1);
@@ -125,6 +132,18 @@ struct LoadingNotification {
 #[derive(Serialize)]
 struct QueueChangedNotification {
     track_uri: String,
+}
+
+#[derive(Serialize)]
+struct ConnectionStateInfo {
+    session_connected: bool,
+    session_connection_id: Option<String>,
+    spirc_ready: bool,
+    device_id: Option<String>,
+    device_name: String,
+    reconnect_attempt: u32,
+    last_error: Option<String>,
+    connected_since_ms: Option<u64>,
 }
 
 /// Get current timestamp in milliseconds since UNIX epoch
@@ -262,6 +281,66 @@ pub extern "C" fn spotifly_register_session_disconnected_callback(callback: exte
 pub extern "C" fn spotifly_register_session_connected_callback(callback: extern "C" fn()) {
     let mut cb = SESSION_CONNECTED_CALLBACK.lock().unwrap();
     *cb = Some(callback);
+}
+
+/// Registers a callback to receive connection state change notifications.
+/// Called whenever the connection state changes (connect, disconnect, error, etc.).
+/// The callback receives JSON with full connection state.
+#[no_mangle]
+pub extern "C" fn spotifly_register_connection_state_callback(
+    callback: extern "C" fn(*const c_char),
+) {
+    let mut cb = CONNECTION_STATE_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Returns the current connection state as a JSON string.
+/// Caller must free the returned string using spotifly_free_string().
+#[no_mangle]
+pub extern "C" fn spotifly_get_connection_state() -> *mut c_char {
+    let state = build_connection_state_info();
+    match serde_json::to_string(&state) {
+        Ok(json) => CString::new(json).unwrap().into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Builds the current connection state info struct
+fn build_connection_state_info() -> ConnectionStateInfo {
+    let session_state = SESSION_CONNECTION_STATE.lock().unwrap();
+    let device_id = DEVICE_ID.lock().unwrap().clone();
+    let last_error = LAST_ERROR.lock().unwrap().clone();
+    let connected_since = CONNECTED_SINCE_MS.load(Ordering::SeqCst);
+
+    ConnectionStateInfo {
+        session_connected: session_state.is_connected,
+        session_connection_id: session_state.connection_id.clone(),
+        spirc_ready: SPIRC_READY.load(Ordering::SeqCst),
+        device_id,
+        device_name: "Spotifly".to_string(),
+        reconnect_attempt: RECONNECT_ATTEMPT.load(Ordering::SeqCst),
+        last_error,
+        connected_since_ms: if connected_since > 0 {
+            Some(connected_since)
+        } else {
+            None
+        },
+    }
+}
+
+/// Sends connection state update to the registered callback
+fn notify_connection_state_change() {
+    let cb_guard = CONNECTION_STATE_CALLBACK.lock().unwrap();
+    if let Some(callback) = *cb_guard {
+        let cb = callback;
+        drop(cb_guard);
+
+        let state = build_connection_state_info();
+        if let Ok(json) = serde_json::to_string(&state) {
+            let c_str = CString::new(json).unwrap();
+            cb(c_str.as_ptr());
+        }
+    }
 }
 
 /// Initializes the player with the given access token.
@@ -484,6 +563,16 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 state.is_connected = false;
                                 state.connection_id = None;
                             }
+                            // Clear connected timestamp and increment reconnect counter
+                            CONNECTED_SINCE_MS.store(0, Ordering::SeqCst);
+                            RECONNECT_ATTEMPT.fetch_add(1, Ordering::SeqCst);
+                            // Store disconnect as last error
+                            {
+                                let mut last_error = LAST_ERROR.lock().unwrap();
+                                *last_error = Some("Session disconnected".to_string());
+                            }
+                            // Notify connection state change
+                            notify_connection_state_change();
                             let cb_guard = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
                             if let Some(callback) = *cb_guard {
                                 let cb = callback;
@@ -499,6 +588,16 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 state.is_connected = true;
                                 state.connection_id = Some(connection_id);
                             }
+                            // Set connected timestamp and reset reconnect counter
+                            CONNECTED_SINCE_MS.store(current_timestamp_ms(), Ordering::SeqCst);
+                            RECONNECT_ATTEMPT.store(0, Ordering::SeqCst);
+                            // Clear last error on successful connect
+                            {
+                                let mut last_error = LAST_ERROR.lock().unwrap();
+                                *last_error = None;
+                            }
+                            // Notify connection state change
+                            notify_connection_state_change();
                             let cb_guard = SESSION_CONNECTED_CALLBACK.lock().unwrap();
                             if let Some(callback) = *cb_guard {
                                 let cb = callback;
@@ -1164,6 +1263,14 @@ pub extern "C" fn spotifly_cleanup() {
         state.is_connected = false;
         state.connection_id = None;
     }
+
+    // Reset connection state tracking (but keep reconnect_attempt for backoff)
+    CONNECTED_SINCE_MS.store(0, Ordering::SeqCst);
+    // Note: We don't reset RECONNECT_ATTEMPT here - it's used for exponential backoff
+    // and should only be reset on successful reconnect (in SessionConnected handler)
+
+    // Notify connection state change
+    notify_connection_state_change();
 
     debug!("spotifly_cleanup complete - ready for reinitialization");
 }

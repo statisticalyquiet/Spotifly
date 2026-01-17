@@ -190,6 +190,18 @@ struct Device: Identifiable, Sendable, Hashable, Encodable {
     let volumePercent: Int?
 }
 
+// MARK: - Own Device Info
+
+/// Information about the local Spotifly device (from librespot).
+struct OwnDeviceInfo: Sendable, Encodable {
+    let id: String
+    let name: String
+    let isConnected: Bool
+    let connectionId: String?
+    let connectedSince: Date?
+    let reconnectAttempts: UInt32
+}
+
 // MARK: - Queue Models
 
 /// Indicates the source of a track in the queue

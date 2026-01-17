@@ -27,6 +27,7 @@ struct LoggedInView: View {
     @State private var albumService: AlbumService
     @State private var artistService: ArtistService
     @State private var queueService: QueueService
+    @State private var connectionService: ConnectionService
 
     // Services - stateless, created on demand (all state lives in AppStore)
     private var trackService: TrackService { TrackService(store: store) }
@@ -54,6 +55,7 @@ struct LoggedInView: View {
         _queueService = State(initialValue: QueueService(store: store, tokenProvider: {
             await session.validAccessToken()
         }))
+        _connectionService = State(initialValue: ConnectionService(store: store))
     }
 
     @State private var selectedNavigationItem: NavigationItem? = .startpage
