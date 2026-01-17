@@ -562,6 +562,13 @@ final class PlaybackViewModel {
                     pendingResumeTrackUri = uri
                     pendingResumePositionMs = positionMs
                     pendingResumeWasPlaying = true
+
+                    // Use soft cleanup to preserve Player for uninterrupted audio
+                    // This only clears Session/Spirc, keeping audio pipeline alive
+                    #if DEBUG
+                        print("[PlaybackViewModel] Using soft cleanup to preserve audio during reconnect")
+                    #endif
+                    SpotifyPlayer.softCleanup()
                 }
 
                 // Mark as not initialized so next action reinitializes

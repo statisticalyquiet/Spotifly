@@ -632,6 +632,9 @@ private let errorNeedsReinit: Int32 = -2
 
 /// Swift wrapper for the Rust librespot playback functionality
 enum SpotifyPlayer {
+    /// Flag indicating soft reconnect mode (preserves Player during reinit)
+    private nonisolated(unsafe) static var softReconnectMode = false
+
     /// Sets the token provider used for Web API calls (e.g., fetching queue on track change).
     /// Should be called before initialize() for best results.
     static func setTokenProvider(_ provider: @escaping @Sendable () async -> String) {
@@ -657,10 +660,19 @@ enum SpotifyPlayer {
         syncSettingsFromUserDefaults()
 
         // Clean up any previous session state before initializing
-        // This is necessary because Session instances cannot be reused after disconnection
-        await Task.detached {
-            spotifly_cleanup()
-        }.value
+        // Skip full cleanup in soft reconnect mode - Rust soft_cleanup already cleared Session/Spirc
+        // and we want to preserve the Player for uninterrupted audio
+        if softReconnectMode {
+            #if DEBUG
+                print("[SpotifyPlayer] Soft reconnect mode - skipping full cleanup to preserve Player")
+            #endif
+            softReconnectMode = false // Reset flag after use
+        } else {
+            // Full cleanup - necessary because Session instances cannot be reused after disconnection
+            await Task.detached {
+                spotifly_cleanup()
+            }.value
+        }
 
         let result = await Task.detached {
             accessToken.withCString { tokenPtr in
@@ -847,6 +859,14 @@ enum SpotifyPlayer {
     /// Call this when the app is quitting to properly disconnect from Spotify Connect.
     static func shutdown() {
         spotifly_shutdown()
+    }
+
+    /// Soft cleanup - preserves Player and Mixer for uninterrupted playback.
+    /// Only clears Session and Spirc, allowing reconnection without audio gap.
+    /// Call this instead of full cleanup when you want to preserve current playback.
+    static func softCleanup() {
+        softReconnectMode = true
+        spotifly_soft_cleanup()
     }
 
     /// Returns whether the player is currently playing.
