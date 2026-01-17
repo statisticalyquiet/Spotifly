@@ -581,7 +581,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                             }
                         }
                         Some(PlayerEvent::SessionConnected { connection_id, user_name }) => {
-                            debug!("SessionConnected event: connection_id={}, user={}", connection_id, user_name);
+                            debug!("SessionConnected event: connection_id={}, user={}, timestamp_ms={}", connection_id, user_name, current_timestamp_ms());
                             // Update session state
                             {
                                 let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
@@ -596,6 +596,19 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 let mut last_error = LAST_ERROR.lock().unwrap();
                                 *last_error = None;
                             }
+
+                            // Re-activate device on reconnect to trigger cluster state sync
+                            // This tells Spotify "I'm available again, send me the current state"
+                            let spirc_guard = SPIRC.lock().unwrap();
+                            if let Some(spirc) = spirc_guard.as_ref() {
+                                if let Err(e) = spirc.transfer(None) {
+                                    debug!("transfer(None) on reconnect failed (non-fatal): {:?}", e);
+                                } else {
+                                    debug!("transfer(None) on reconnect succeeded - awaiting cluster state");
+                                }
+                            }
+                            drop(spirc_guard);
+
                             // Notify connection state change
                             notify_connection_state_change();
                             let cb_guard = SESSION_CONNECTED_CALLBACK.lock().unwrap();
@@ -651,7 +664,8 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                         debug!("Cluster present");
 
                         if let Some(player_state) = cluster.player_state.into_option() {
-                            debug!("PlayerState present");
+                            debug!("ClusterUpdate: position_as_of_timestamp={}ms, is_playing={}",
+                                   player_state.position_as_of_timestamp, player_state.is_playing);
                             // Send playback state update
                             send_playback_state(&player_state);
                             // Send queue update
@@ -669,6 +683,39 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
             }
         }
         debug!("Cluster listener task ended");
+
+        // When cluster listener ends, Spirc is dead. If we were connected,
+        // trigger disconnect callback as fallback (in case SessionDisconnectedEvent wasn't emitted)
+        let was_connected = {
+            let state = SESSION_CONNECTION_STATE.lock().unwrap();
+            state.is_connected
+        };
+
+        if was_connected {
+            debug!("Cluster listener ended while session was connected - triggering fallback disconnect");
+            // Update session state
+            {
+                let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
+                state.is_connected = false;
+                state.connection_id = None;
+            }
+            CONNECTED_SINCE_MS.store(0, Ordering::SeqCst);
+            RECONNECT_ATTEMPT.fetch_add(1, Ordering::SeqCst);
+            {
+                let mut last_error = LAST_ERROR.lock().unwrap();
+                *last_error = Some("Cluster listener ended unexpectedly".to_string());
+            }
+            notify_connection_state_change();
+
+            // Trigger session disconnected callback
+            let cb_guard = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
+            if let Some(callback) = *cb_guard {
+                let cb = callback;
+                drop(cb_guard);
+                debug!("Calling session disconnected callback from cluster listener");
+                cb();
+            }
+        }
     });
 
     // Create Spirc for Spotify Connect support (makes this app appear as a Connect device)
@@ -699,6 +746,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
             let mut spirc_guard = SPIRC.lock().unwrap();
             *spirc_guard = Some(spirc_arc);
             SPIRC_READY.store(true, Ordering::SeqCst);
+            debug!("SPIRC_READY set to true");
 
             // Mark session as connected immediately - Spirc is ready for commands
             // The SessionConnected event will update connection_id when it arrives

@@ -102,6 +102,9 @@ final class PlaybackViewModel {
     private var pendingResumePositionMs: UInt32 = 0
     private var pendingResumeWasPlaying: Bool = false
 
+    /// Timestamp when session was disconnected (for logging elapsed time on reconnect)
+    private var disconnectedAt: Date?
+
     /// Reconnection state for exponential backoff
     private var reconnectAttempt: Int = 0
     private var reconnectTask: Task<Void, Never>?
@@ -547,8 +550,11 @@ final class PlaybackViewModel {
                 let trackUri = currentTrackUri
                 let positionMs = currentPositionMs
 
+                // Record disconnect timestamp for elapsed time logging
+                disconnectedAt = Date()
+
                 #if DEBUG
-                    print("[PlaybackViewModel] Session disconnected - capturing state: uri=\(trackUri ?? "nil"), pos=\(positionMs)ms, playing=\(wasPlaying)")
+                    print("[PlaybackViewModel] Session disconnected at \(Date()) - capturing state: uri=\(trackUri ?? "nil"), pos=\(positionMs)ms, playing=\(wasPlaying)")
                 #endif
 
                 // Store state for resumption after reconnect
@@ -639,35 +645,21 @@ final class PlaybackViewModel {
                 let positionMs = pendingResumePositionMs
 
                 #if DEBUG
-                    print("[PlaybackViewModel] Session reconnected - resuming playback: uri=\(trackUri), pos=\(positionMs)ms")
+                    let elapsed = disconnectedAt.map { Date().timeIntervalSince($0) } ?? 0
+                    print("[PlaybackViewModel] Session reconnected after \(String(format: "%.1f", elapsed))s - pending resume: uri=\(trackUri), pos=\(positionMs)ms")
                 #endif
 
-                // Clear pending state
+                // Clear URI/position but KEEP pendingResumeWasPlaying flag
+                // The Rust layer calls transfer(None) which loads the track at correct position
+                // BUT the cluster state has is_paused=true (set by old Spirc shutdown)
+                // We'll resume in the Loading callback when the track starts loading
                 pendingResumeTrackUri = nil
                 pendingResumePositionMs = 0
-                pendingResumeWasPlaying = false
+                // NOTE: Don't clear pendingResumeWasPlaying - Loading handler will use it
 
-                // Resume playback after a short delay to ensure spirc is fully ready
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(100))
-
-                    // Resume the track at the saved position
-                    do {
-                        try await SpotifyPlayer.play(uriOrUrl: trackUri)
-                        // Seek to the position we were at (add a small buffer for the time elapsed)
-                        try? await Task.sleep(for: .milliseconds(200))
-                        try SpotifyPlayer.seek(positionMs: positionMs)
-                        #if DEBUG
-                            print("[PlaybackViewModel] Seamless reconnect complete - playback resumed")
-                        #endif
-                    } catch {
-                        #if DEBUG
-                            print("[PlaybackViewModel] Failed to resume playback after reconnect: \(error)")
-                        #endif
-                        // Reset playing state if we couldn't resume
-                        self.isPlaying = false
-                    }
-                }
+                #if DEBUG
+                    print("[PlaybackViewModel] Session reconnected - awaiting Loading callback to resume")
+                #endif
             }
     }
 
@@ -688,6 +680,17 @@ final class PlaybackViewModel {
                     currentTrackUri = notification.trackUri
                     // Mark as playing since we're loading a new track
                     isPlaying = true
+                }
+
+                // Resume playback after reconnect if we were playing before disconnect
+                // The transfer(None) loads the track at correct position but paused
+                // (because old Spirc set is_paused=true during shutdown)
+                if pendingResumeWasPlaying {
+                    pendingResumeWasPlaying = false
+                    #if DEBUG
+                        print("[PlaybackViewModel] Resuming playback after reconnect (was playing before disconnect)")
+                    #endif
+                    SpotifyPlayer.resume()
                 }
             }
     }
