@@ -358,6 +358,18 @@ final class AppStore {
         playlists[playlistId]?.trackIds.removeAll { $0 == trackId }
     }
 
+    /// Move track within playlist (reorder)
+    func movePlaylistTrack(playlistId: String, fromIndex: Int, toIndex: Int) {
+        guard var trackIds = playlists[playlistId]?.trackIds,
+              fromIndex >= 0, fromIndex < trackIds.count,
+              toIndex >= 0, toIndex < trackIds.count,
+              fromIndex != toIndex
+        else { return }
+
+        trackIds.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+        playlists[playlistId]?.trackIds = trackIds
+    }
+
     /// Update playlist details
     func updatePlaylistDetails(id: String, name: String? = nil, description: String? = nil, isPublic: Bool? = nil) {
         if let name { playlists[id]?.name = name }

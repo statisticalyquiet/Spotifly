@@ -9,6 +9,13 @@ import SwiftUI
 
 extension Notification.Name {
     static let scrollToCurrentTrack = Notification.Name("scrollToCurrentTrack")
+
+    // Toolbar menu actions
+    static let showAlbumRemoveConfirmation = Notification.Name("showAlbumRemoveConfirmation")
+    static let showArtistUnfollowConfirmation = Notification.Name("showArtistUnfollowConfirmation")
+    static let showPlaylistEditDetails = Notification.Name("showPlaylistEditDetails")
+    static let showPlaylistDeleteConfirmation = Notification.Name("showPlaylistDeleteConfirmation")
+    static let showPlaylistUnfollowConfirmation = Notification.Name("showPlaylistUnfollowConfirmation")
 }
 
 struct QueueListView: View {

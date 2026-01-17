@@ -90,6 +90,11 @@ struct AlbumDetailView: View {
         } message: {
             Text("Are you sure you want to remove \"\(album?.name ?? "")\" from your library?")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showAlbumRemoveConfirmation)) { notification in
+            if let notificationAlbumId = notification.object as? String, notificationAlbumId == albumId {
+                showRemoveConfirmation = true
+            }
+        }
     }
 
     private func albumContent(_ album: Album) -> some View {
@@ -161,64 +166,18 @@ struct AlbumDetailView: View {
                         }
                     }
 
-                    // Play All button and menu
-                    HStack(spacing: 12) {
-                        Button {
-                            playAllTracks()
-                        } label: {
-                            Label("playback.play_album", systemImage: "play.fill")
-                                .font(.headline)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 12)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.green)
-                        .disabled(tracks.isEmpty)
-
-                        // Context menu
-                        Menu {
-                            // Single unified action - "Play Next" adds to queue
-                            Button {
-                                addToQueue()
-                            } label: {
-                                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-                            }
-                            .disabled(tracks.isEmpty)
-
-                            Divider()
-
-                            Button {
-                                copyToClipboard(album)
-                            } label: {
-                                Label("Share", systemImage: "square.and.arrow.up")
-                            }
-                            .disabled(album.externalUrl == nil)
-
-                            // Show add/remove option based on library status
-                            Divider()
-
-                            if isInLibrary {
-                                Button(role: .destructive) {
-                                    showRemoveConfirmation = true
-                                } label: {
-                                    Label("Remove from Library", systemImage: "minus.circle")
-                                }
-                            } else {
-                                Button {
-                                    saveToLibrary()
-                                } label: {
-                                    Label("Add to Library", systemImage: "plus.circle")
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
+                    // Play All button
+                    Button {
+                        playAllTracks()
+                    } label: {
+                        Label("playback.play_album", systemImage: "play.fill")
+                            .font(.headline)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .disabled(tracks.isEmpty)
                 }
                 .padding(.top, 24)
 
@@ -303,26 +262,6 @@ struct AlbumDetailView: View {
         }
     }
 
-    private func addToQueue() {
-        Task {
-            let token = await session.validAccessToken()
-            for track in tracks {
-                await playbackViewModel.addToQueue(
-                    trackUri: track.uri,
-                    accessToken: token,
-                )
-            }
-        }
-    }
-
-    private func copyToClipboard(_ album: Album) {
-        guard let externalUrl = album.externalUrl else { return }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(externalUrl, forType: .string)
-    }
-
     private func removeFromLibrary() {
         Task {
             do {
@@ -335,20 +274,6 @@ struct AlbumDetailView: View {
                 navigationCoordinator.clearAlbumSelection()
             } catch {
                 errorMessage = "Failed to remove album: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func saveToLibrary() {
-        Task {
-            do {
-                let token = await session.validAccessToken()
-                try await albumService.saveAlbumToLibrary(
-                    albumId: albumId,
-                    accessToken: token,
-                )
-            } catch {
-                errorMessage = "Failed to add album: \(error.localizedDescription)"
             }
         }
     }

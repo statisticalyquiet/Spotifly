@@ -88,6 +88,11 @@ struct ArtistDetailView: View {
         } message: {
             Text("Are you sure you want to unfollow \"\(artist?.name ?? "")\"?")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showArtistUnfollowConfirmation)) { notification in
+            if let notificationArtistId = notification.object as? String, notificationArtistId == artistId {
+                showUnfollowConfirmation = true
+            }
+        }
     }
 
     private func artistContent(_ artist: Artist) -> some View {
@@ -144,22 +149,18 @@ struct ArtistDetailView: View {
                         }
                     }
 
-                    // Play Top Tracks button and context menu
-                    HStack(spacing: 12) {
-                        Button {
-                            playAllTopTracks()
-                        } label: {
-                            Label("playback.play_top_tracks", systemImage: "play.fill")
-                                .font(.headline)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 12)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.green)
-                        .disabled(topTracks.isEmpty)
-
-                        artistContextMenu(artist)
+                    // Play Top Tracks button
+                    Button {
+                        playAllTopTracks()
+                    } label: {
+                        Label("playback.play_top_tracks", systemImage: "play.fill")
+                            .font(.headline)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .disabled(topTracks.isEmpty)
                 }
                 .padding(.top, 24)
 
@@ -368,72 +369,6 @@ struct ArtistDetailView: View {
             // This properly loads the artist context instead of individual tracks
             await playbackViewModel.play(uriOrUrl: artist.uri, accessToken: token)
         }
-    }
-
-    private func artistContextMenu(_ artist: Artist) -> some View {
-        Menu {
-            // Play Next - adds top tracks to queue
-            Button {
-                addToQueue()
-            } label: {
-                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-            }
-            .disabled(topTracks.isEmpty)
-
-            Divider()
-
-            // Share
-            Button {
-                copyToClipboard(artist)
-            } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
-            }
-            .disabled(artist.externalUrl == nil)
-
-            // Show follow/unfollow option based on following status
-            Divider()
-
-            if isFollowing {
-                Button(role: .destructive) {
-                    showUnfollowConfirmation = true
-                } label: {
-                    Label("Unfollow", systemImage: "person.badge.minus")
-                }
-            } else {
-                Button {
-                    followArtist()
-                } label: {
-                    Label("Follow", systemImage: "person.badge.plus")
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis.circle.fill")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-    }
-
-    private func addToQueue() {
-        Task {
-            let token = await session.validAccessToken()
-            for track in topTracks {
-                await playbackViewModel.addToQueue(
-                    trackUri: track.uri,
-                    accessToken: token,
-                )
-            }
-        }
-    }
-
-    private func copyToClipboard(_ artist: Artist) {
-        guard let externalUrl = artist.externalUrl else { return }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(externalUrl, forType: .string)
     }
 
     private func formatFollowers(_ count: Int) -> String {

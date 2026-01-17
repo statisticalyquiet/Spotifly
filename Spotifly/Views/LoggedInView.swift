@@ -248,6 +248,197 @@ struct LoggedInView: View {
                 .help("Scroll to Current Track")
             }
         }
+        ToolbarItem(placement: .navigation) {
+            contextMenu
+        }
+    }
+
+    // MARK: - Context Menu
+
+    @ViewBuilder
+    private var contextMenu: some View {
+        switch selectedNavigationItem {
+        case .albums:
+            if let albumId = selectedAlbumId, let album = store.albums[albumId] {
+                albumContextMenu(album: album)
+            }
+        case .artists:
+            if let artistId = selectedArtistId, let artist = store.artists[artistId] {
+                artistContextMenu(artist: artist)
+            }
+        case .playlists:
+            if let playlistId = selectedPlaylistId, let playlist = store.playlists[playlistId] {
+                playlistContextMenu(playlist: playlist)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func albumContextMenu(album: Album) -> some View {
+        let tracks = album.trackIds.compactMap { store.tracks[$0] }
+        let isInLibrary = store.userAlbumIds.contains(album.id)
+
+        return Menu {
+            Button {
+                Task {
+                    let token = await session.validAccessToken()
+                    for track in tracks {
+                        await playbackViewModel.addToQueue(trackUri: track.uri, accessToken: token)
+                    }
+                }
+            } label: {
+                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            .disabled(tracks.isEmpty)
+
+            Divider()
+
+            Button {
+                if let externalUrl = album.externalUrl {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(externalUrl, forType: .string)
+                }
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .disabled(album.externalUrl == nil)
+
+            Divider()
+
+            if isInLibrary {
+                Button(role: .destructive) {
+                    NotificationCenter.default.post(name: .showAlbumRemoveConfirmation, object: album.id)
+                } label: {
+                    Label("Remove from Library", systemImage: "minus.circle")
+                }
+            } else {
+                Button {
+                    Task {
+                        let token = await session.validAccessToken()
+                        try? await albumService.saveAlbumToLibrary(albumId: album.id, accessToken: token)
+                    }
+                } label: {
+                    Label("Add to Library", systemImage: "plus.circle")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuIndicator(.hidden)
+    }
+
+    private func artistContextMenu(artist: Artist) -> some View {
+        let isFollowing = store.userArtistIds.contains(artist.id)
+
+        return Menu {
+            Button {
+                if let externalUrl = artist.externalUrl {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(externalUrl, forType: .string)
+                }
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .disabled(artist.externalUrl == nil)
+
+            Divider()
+
+            if isFollowing {
+                Button(role: .destructive) {
+                    NotificationCenter.default.post(name: .showArtistUnfollowConfirmation, object: artist.id)
+                } label: {
+                    Label("Unfollow", systemImage: "person.badge.minus")
+                }
+            } else {
+                Button {
+                    Task {
+                        let token = await session.validAccessToken()
+                        try? await artistService.followArtist(artistId: artist.id, accessToken: token)
+                    }
+                } label: {
+                    Label("Follow", systemImage: "person.badge.plus")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuIndicator(.hidden)
+    }
+
+    private func playlistContextMenu(playlist: Playlist) -> some View {
+        let tracks = playlist.trackIds.compactMap { store.tracks[$0] }
+        let isOwner = playlist.ownerId == session.userId
+        let isInLibrary = store.userPlaylistIds.contains(playlist.id)
+
+        return Menu {
+            Button {
+                Task {
+                    let token = await session.validAccessToken()
+                    for track in tracks {
+                        await playbackViewModel.addToQueue(trackUri: track.uri, accessToken: token)
+                    }
+                }
+            } label: {
+                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            .disabled(tracks.isEmpty)
+
+            Divider()
+
+            Button {
+                if let externalUrl = playlist.externalUrl {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(externalUrl, forType: .string)
+                }
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .disabled(playlist.externalUrl == nil)
+
+            if isOwner {
+                Divider()
+
+                Button {
+                    NotificationCenter.default.post(name: .showPlaylistEditDetails, object: playlist.id)
+                } label: {
+                    Label("Edit Details", systemImage: "pencil")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    NotificationCenter.default.post(name: .showPlaylistDeleteConfirmation, object: playlist.id)
+                } label: {
+                    Label("Delete Playlist", systemImage: "trash")
+                }
+            } else {
+                Divider()
+
+                if isInLibrary {
+                    Button(role: .destructive) {
+                        NotificationCenter.default.post(name: .showPlaylistUnfollowConfirmation, object: playlist.id)
+                    } label: {
+                        Label("Unfollow Playlist", systemImage: "minus.circle")
+                    }
+                } else {
+                    Button {
+                        Task {
+                            let token = await session.validAccessToken()
+                            try? await playlistService.followPlaylist(playlistId: playlist.id, accessToken: token)
+                        }
+                    } label: {
+                        Label("Follow Playlist", systemImage: "plus.circle")
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuIndicator(.hidden)
     }
 
     private func performSearch() {
