@@ -572,10 +572,10 @@ final class AppStore {
                 if let jsonString = String(data: data, encoding: .utf8) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(jsonString, forType: .string)
-                    print("[Debug] AppStore state copied to clipboard (\(jsonString.count) chars)")
+                    debugLog("Debug", "AppStore state copied to clipboard (\(jsonString.count) chars)")
                 }
             } catch {
-                print("[Debug] Failed to encode AppStore state: \(error)")
+                debugLog("Debug", "Failed to encode AppStore state: \(error)")
             }
         }
     #endif

@@ -514,9 +514,7 @@ final class PlaybackViewModel {
                 guard let self else { return }
                 // Convert from 0-65535 to 0.0-1.0
                 let normalizedVolume = Double(volumeU16) / 65535.0
-                #if DEBUG
-                    print("[PlaybackViewModel] Remote volume change: \(volumeU16) -> \(normalizedVolume)")
-                #endif
+                debugLog("PlaybackViewModel", "Remote volume change: \(volumeU16) -> \(normalizedVolume)")
                 // Set flag to prevent feedback loop
                 isSettingVolumeLocally = true
                 volume = normalizedVolume
@@ -553,9 +551,7 @@ final class PlaybackViewModel {
                 // Record disconnect timestamp for elapsed time logging
                 disconnectedAt = Date()
 
-                #if DEBUG
-                    print("[PlaybackViewModel] Session disconnected at \(Date()) - capturing state: uri=\(trackUri ?? "nil"), pos=\(positionMs)ms, playing=\(wasPlaying)")
-                #endif
+                debugLog("PlaybackViewModel", "Session disconnected at \(Date()) - capturing state: uri=\(trackUri ?? "nil"), pos=\(positionMs)ms, playing=\(wasPlaying)")
 
                 // Store state for resumption after reconnect
                 if wasPlaying, let uri = trackUri, !uri.isEmpty {
@@ -565,9 +561,7 @@ final class PlaybackViewModel {
 
                     // Use soft cleanup to preserve Player for uninterrupted audio
                     // This only clears Session/Spirc, keeping audio pipeline alive
-                    #if DEBUG
-                        print("[PlaybackViewModel] Using soft cleanup to preserve audio during reconnect")
-                    #endif
+                    debugLog("PlaybackViewModel", "Using soft cleanup to preserve audio during reconnect")
                     SpotifyPlayer.softCleanup()
                 }
 
@@ -589,9 +583,7 @@ final class PlaybackViewModel {
                         if Task.isCancelled { break }
 
                         let delay = reconnectDelay(attempt: reconnectAttempt)
-                        #if DEBUG
-                            print("[PlaybackViewModel] Reconnect attempt \(reconnectAttempt + 1)/\(maxReconnectAttempts), delay: \(delay)s")
-                        #endif
+                        debugLog("PlaybackViewModel", "Reconnect attempt \(reconnectAttempt + 1)/\(maxReconnectAttempts), delay: \(delay)s")
 
                         // Wait for delay (if any)
                         if delay > 0 {
@@ -607,9 +599,7 @@ final class PlaybackViewModel {
 
                         // If initialized, we're done - SessionConnected callback will handle the rest
                         if isInitialized {
-                            #if DEBUG
-                                print("[PlaybackViewModel] Reconnection successful on attempt \(reconnectAttempt + 1)")
-                            #endif
+                            debugLog("PlaybackViewModel", "Reconnection successful on attempt \(reconnectAttempt + 1)")
                             break
                         }
 
@@ -618,9 +608,7 @@ final class PlaybackViewModel {
 
                     // If we exhausted attempts, give up and update UI
                     if reconnectAttempt >= maxReconnectAttempts {
-                        #if DEBUG
-                            print("[PlaybackViewModel] Reconnection failed after \(maxReconnectAttempts) attempts")
-                        #endif
+                        debugLog("PlaybackViewModel", "Reconnection failed after \(maxReconnectAttempts) attempts")
                         isPlaying = false
                         pendingResumeWasPlaying = false
                     }
@@ -651,10 +639,8 @@ final class PlaybackViewModel {
 
                 let positionMs = pendingResumePositionMs
 
-                #if DEBUG
-                    let elapsed = disconnectedAt.map { Date().timeIntervalSince($0) } ?? 0
-                    print("[PlaybackViewModel] Session reconnected after \(String(format: "%.1f", elapsed))s - pending resume: uri=\(trackUri), pos=\(positionMs)ms")
-                #endif
+                let elapsed = disconnectedAt.map { Date().timeIntervalSince($0) } ?? 0
+                debugLog("PlaybackViewModel", "Session reconnected after \(String(format: "%.1f", elapsed))s - pending resume: uri=\(trackUri), pos=\(positionMs)ms")
 
                 // Clear URI/position but KEEP pendingResumeWasPlaying flag
                 // The Rust layer calls transfer(None) which loads the track at correct position
@@ -664,9 +650,7 @@ final class PlaybackViewModel {
                 pendingResumePositionMs = 0
                 // NOTE: Don't clear pendingResumeWasPlaying - Loading handler will use it
 
-                #if DEBUG
-                    print("[PlaybackViewModel] Session reconnected - awaiting Loading callback to resume")
-                #endif
+                debugLog("PlaybackViewModel", "Session reconnected - awaiting Loading callback to resume")
             }
     }
 
@@ -678,9 +662,7 @@ final class PlaybackViewModel {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 guard let self else { return }
-                #if DEBUG
-                    print("[PlaybackViewModel] Loading notification: \(notification.trackUri) at \(notification.positionMs)ms")
-                #endif
+                debugLog("PlaybackViewModel", "Loading notification: \(notification.trackUri) at \(notification.positionMs)ms")
 
                 // Update current track URI immediately for faster Now Playing updates
                 if !notification.trackUri.isEmpty, notification.trackUri != currentTrackUri {
@@ -694,9 +676,7 @@ final class PlaybackViewModel {
                 // (because old Spirc set is_paused=true during shutdown)
                 if pendingResumeWasPlaying {
                     pendingResumeWasPlaying = false
-                    #if DEBUG
-                        print("[PlaybackViewModel] Resuming playback after reconnect (was playing before disconnect)")
-                    #endif
+                    debugLog("PlaybackViewModel", "Resuming playback after reconnect (was playing before disconnect)")
                     SpotifyPlayer.resume()
                 }
             }
@@ -706,9 +686,7 @@ final class PlaybackViewModel {
     private func handlePlaybackStateUpdate(_ state: PlaybackState?) {
         guard let state else { return }
 
-        #if DEBUG
-            print("[PlaybackViewModel] Playback state update: playing=\(state.isPlaying), paused=\(state.isPaused), uri=\(state.trackUri)")
-        #endif
+        debugLog("PlaybackViewModel", "Playback state update: playing=\(state.isPlaying), paused=\(state.isPaused), uri=\(state.trackUri)")
 
         // Update playing state
         // is_playing = true means actively playing audio

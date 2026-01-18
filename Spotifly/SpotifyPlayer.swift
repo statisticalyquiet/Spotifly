@@ -160,9 +160,7 @@ private nonisolated func registerVolumeCallback() {
 
 /// C callback for volume change notifications from Rust
 private nonisolated func handleVolumeCallback(_ volume: UInt16) {
-    #if DEBUG
-        print("[SpotifyPlayer] Volume callback: \(volume)")
-    #endif
+    debugLog("SpotifyPlayer", "Volume callback: \(volume)")
     volumeSubject.send(volume)
 }
 
@@ -177,16 +175,12 @@ private nonisolated func registerLoadingCallback() {
 /// Fires earlier than TrackChanged (~180ms vs ~620ms after remote command)
 private nonisolated func handleLoadingCallback(_ jsonPtr: UnsafePointer<CChar>?) {
     guard let jsonPtr else {
-        #if DEBUG
-            print("[SpotifyPlayer] handleLoadingCallback: jsonPtr is nil")
-        #endif
+        debugLog("SpotifyPlayer", "handleLoadingCallback: jsonPtr is nil")
         return
     }
 
     let jsonString = String(cString: jsonPtr)
-    #if DEBUG
-        print("[SpotifyPlayer] Loading callback: \(jsonString)")
-    #endif
+    debugLog("SpotifyPlayer", "Loading callback: \(jsonString)")
 
     guard let data = jsonString.data(using: .utf8) else {
         return
@@ -203,9 +197,7 @@ private nonisolated func handleLoadingCallback(_ jsonPtr: UnsafePointer<CChar>?)
         let notification = LoadingNotification(trackUri: trackUri, positionMs: positionMs)
         loadingSubject.send(notification)
     } catch {
-        #if DEBUG
-            print("[SpotifyPlayer] Failed to parse loading JSON: \(error)")
-        #endif
+        debugLog("SpotifyPlayer", "Failed to parse loading JSON: \(error)")
     }
 }
 
@@ -226,16 +218,12 @@ private nonisolated func registerConnectionStateCallback() {
 /// C callback for connection state updates from Rust
 private nonisolated func handleConnectionStateCallback(_ jsonPtr: UnsafePointer<CChar>?) {
     guard let jsonPtr else {
-        #if DEBUG
-            print("[SpotifyPlayer] handleConnectionStateCallback: jsonPtr is nil")
-        #endif
+        debugLog("SpotifyPlayer", "handleConnectionStateCallback: jsonPtr is nil")
         return
     }
 
     let jsonString = String(cString: jsonPtr)
-    #if DEBUG
-        print("[SpotifyPlayer] Connection state callback: \(jsonString)")
-    #endif
+    debugLog("SpotifyPlayer", "Connection state callback: \(jsonString)")
 
     guard let data = jsonString.data(using: .utf8) else {
         return
@@ -259,9 +247,7 @@ private nonisolated func handleConnectionStateCallback(_ jsonPtr: UnsafePointer<
 
         connectionStateSubject.send(state)
     } catch {
-        #if DEBUG
-            print("[SpotifyPlayer] Failed to parse connection state JSON: \(error)")
-        #endif
+        debugLog("SpotifyPlayer", "Failed to parse connection state JSON: \(error)")
     }
 }
 
@@ -269,16 +255,12 @@ private nonisolated func handleConnectionStateCallback(_ jsonPtr: UnsafePointer<
 /// Fires when a remote device adds a track to the queue
 private nonisolated func handleQueueChangedCallback(_ jsonPtr: UnsafePointer<CChar>?) {
     guard let jsonPtr else {
-        #if DEBUG
-            print("[SpotifyPlayer] handleQueueChangedCallback: jsonPtr is nil")
-        #endif
+        debugLog("SpotifyPlayer", "handleQueueChangedCallback: jsonPtr is nil")
         return
     }
 
     let jsonString = String(cString: jsonPtr)
-    #if DEBUG
-        print("[SpotifyPlayer] Queue changed callback: \(jsonString)")
-    #endif
+    debugLog("SpotifyPlayer", "Queue changed callback: \(jsonString)")
 
     guard let data = jsonString.data(using: .utf8) else {
         return
@@ -296,13 +278,11 @@ private nonisolated func handleQueueChangedCallback(_ jsonPtr: UnsafePointer<CCh
         // Refresh queue from Web API to update the UI
         // Add a small delay to let Spotify's servers process the queue change
         Task {
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: .milliseconds(500))
             await fetchAndEmitQueueState()
         }
     } catch {
-        #if DEBUG
-            print("[SpotifyPlayer] Failed to parse queue changed JSON: \(error)")
-        #endif
+        debugLog("SpotifyPlayer", "Failed to parse queue changed JSON: \(error)")
     }
 }
 
@@ -316,9 +296,7 @@ private nonisolated func registerSessionDisconnectedCallback() {
 /// C callback for session disconnection notifications from Rust
 /// Fires when the Spotify session disconnects (e.g., idle timeout)
 private nonisolated func handleSessionDisconnectedCallback() {
-    #if DEBUG
-        print("[SpotifyPlayer] Session disconnected event received - triggering reinit")
-    #endif
+    debugLog("SpotifyPlayer", "Session disconnected event received - triggering reinit")
     sessionDisconnectedSubject.send()
 }
 
@@ -332,23 +310,19 @@ private nonisolated func registerSessionConnectedCallback() {
 /// C callback for session connection notifications from Rust
 /// Fires when the Spotify session is connected and ready for playback commands
 private nonisolated func handleSessionConnectedCallback() {
-    #if DEBUG
-        print("[SpotifyPlayer] Session connected event received - ready for commands")
-    #endif
+    debugLog("SpotifyPlayer", "Session connected event received - ready for commands")
     sessionConnectedSubject.send()
 }
 
 /// C callback for state update notifications from Rust
 /// Triggers a Web API fetch to get the current queue state
 private nonisolated func handleStateUpdateCallback() {
-    #if DEBUG
-        print("[SpotifyPlayer] State update callback triggered - fetching queue from Web API")
-    #endif
+    debugLog("SpotifyPlayer", "State update callback triggered - fetching queue from Web API")
 
     // Launch async task to fetch queue
     // Add a small delay to let Spotify's servers process the state change
     Task {
-        try? await Task.sleep(for: .milliseconds(300))
+        try? await Task.sleep(for: .milliseconds(500))
         await fetchAndEmitQueueState()
     }
 }
@@ -357,9 +331,7 @@ private nonisolated func handleStateUpdateCallback() {
 /// - Parameter retryOnEmpty: If true and queue is empty but has current track, retry after delay
 private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
     guard let tokenProvider = stateUpdateTokenProvider else {
-        #if DEBUG
-            print("[SpotifyPlayer] No token provider set for queue fetch")
-        #endif
+        debugLog("SpotifyPlayer", "No token provider set for queue fetch")
         return
     }
 
@@ -405,15 +377,11 @@ private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
 
         queueSubject.send(queueState)
 
-        #if DEBUG
-            print("[SpotifyPlayer] Queue fetched from Web API: current=\(currentTrack?.name ?? "none"), next=\(nextTracks.count) tracks")
-        #endif
+        debugLog("SpotifyPlayer", "Queue fetched from Web API: current=\(currentTrack?.name ?? "none"), next=\(nextTracks.count) tracks")
 
         // If we have a current track but empty queue, retry after delay (device activation settling)
         if retryOnEmpty, currentTrack != nil, nextTracks.isEmpty {
-            #if DEBUG
-                print("[SpotifyPlayer] Queue empty with current track - retrying after delay")
-            #endif
+            debugLog("SpotifyPlayer", "Queue empty with current track - retrying after delay")
             try? await Task.sleep(for: .milliseconds(500))
             await fetchAndEmitQueueState(retryOnEmpty: false)
             return
@@ -436,44 +404,32 @@ private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
             playbackStateSubject.send(playbackState)
         }
     } catch {
-        #if DEBUG
-            print("[SpotifyPlayer] Failed to fetch queue from Web API: \(error)")
-        #endif
+        debugLog("SpotifyPlayer", "Failed to fetch queue from Web API: \(error)")
     }
 }
 
 /// C callback for playback state updates from Rust
 /// Uses manual JSON parsing to avoid Decodable actor isolation issues
 private nonisolated func handlePlaybackStateCallback(_ jsonPtr: UnsafePointer<CChar>?) {
-    #if DEBUG
-        print("[SpotifyPlayer] handlePlaybackStateCallback called")
-    #endif
+    debugLog("SpotifyPlayer", "handlePlaybackStateCallback called")
 
     guard let jsonPtr else {
-        #if DEBUG
-            print("[SpotifyPlayer] handlePlaybackStateCallback: jsonPtr is nil")
-        #endif
+        debugLog("SpotifyPlayer", "handlePlaybackStateCallback: jsonPtr is nil")
         return
     }
 
     let jsonString = String(cString: jsonPtr)
-    #if DEBUG
-        print("[SpotifyPlayer] handlePlaybackStateCallback received JSON (\(jsonString.count) chars)")
-    #endif
+    debugLog("SpotifyPlayer", "handlePlaybackStateCallback received JSON (\(jsonString.count) chars)")
 
     guard let data = jsonString.data(using: .utf8) else {
-        #if DEBUG
-            print("[SpotifyPlayer] handlePlaybackStateCallback: failed to convert JSON to data")
-        #endif
+        debugLog("SpotifyPlayer", "handlePlaybackStateCallback: failed to convert JSON to data")
         return
     }
 
     do {
         // Use JSONSerialization instead of Decodable to avoid actor isolation issues
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            #if DEBUG
-                print("[SpotifyPlayer] handlePlaybackStateCallback: JSON is not a dictionary")
-            #endif
+            debugLog("SpotifyPlayer", "handlePlaybackStateCallback: JSON is not a dictionary")
             return
         }
 
@@ -488,17 +444,12 @@ private nonisolated func handlePlaybackStateCallback(_ jsonPtr: UnsafePointer<CC
             repeatContext: json["repeat_context"] as? Bool ?? false,
         )
 
-        #if DEBUG
-            print("[SpotifyPlayer] PlaybackState: playing=\(state.isPlaying), paused=\(state.isPaused), pos=\(state.positionMs)ms, dur=\(state.durationMs)ms, shuffle=\(state.shuffle), repeatTrack=\(state.repeatTrack), repeatContext=\(state.repeatContext)")
-        #endif
+        debugLog("SpotifyPlayer", "PlaybackState: playing=\(state.isPlaying), paused=\(state.isPaused), pos=\(state.positionMs)ms, dur=\(state.durationMs)ms, shuffle=\(state.shuffle), repeatTrack=\(state.repeatTrack), repeatContext=\(state.repeatContext)")
 
         playbackStateSubject.send(state)
     } catch {
-        print("[SpotifyPlayer] Failed to parse playback state JSON: \(error)")
-        #if DEBUG
-            let preview = String(jsonString.prefix(500))
-            print("[SpotifyPlayer] JSON preview: \(preview)")
-        #endif
+        debugLog("SpotifyPlayer", "Failed to parse playback state JSON: \(error)")
+        debugLog("SpotifyPlayer", "JSON preview: \(String(jsonString.prefix(500)))")
     }
 }
 
@@ -521,35 +472,25 @@ private nonisolated func parseQueueItem(from dict: [String: Any]) -> QueueItem? 
 /// C callback for queue updates from Rust
 /// Uses manual JSON parsing to avoid Decodable actor isolation issues
 private nonisolated func handleQueueCallback(_ jsonPtr: UnsafePointer<CChar>?) {
-    #if DEBUG
-        print("[SpotifyPlayer] handleQueueCallback called")
-    #endif
+    debugLog("SpotifyPlayer", "handleQueueCallback called")
 
     guard let jsonPtr else {
-        #if DEBUG
-            print("[SpotifyPlayer] handleQueueCallback: jsonPtr is nil")
-        #endif
+        debugLog("SpotifyPlayer", "handleQueueCallback: jsonPtr is nil")
         return
     }
 
     let jsonString = String(cString: jsonPtr)
-    #if DEBUG
-        print("[SpotifyPlayer] handleQueueCallback received JSON (\(jsonString.count) chars)")
-    #endif
+    debugLog("SpotifyPlayer", "handleQueueCallback received JSON (\(jsonString.count) chars)")
 
     guard let data = jsonString.data(using: .utf8) else {
-        #if DEBUG
-            print("[SpotifyPlayer] handleQueueCallback: failed to convert JSON to data")
-        #endif
+        debugLog("SpotifyPlayer", "handleQueueCallback: failed to convert JSON to data")
         return
     }
 
     do {
         // Use JSONSerialization instead of Decodable to avoid actor isolation issues
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            #if DEBUG
-                print("[SpotifyPlayer] handleQueueCallback: JSON is not a dictionary")
-            #endif
+            debugLog("SpotifyPlayer", "handleQueueCallback: JSON is not a dictionary")
             return
         }
 
@@ -580,20 +521,15 @@ private nonisolated func handleQueueCallback(_ jsonPtr: UnsafePointer<CChar>?) {
             previousTracks: prevTracks,
         )
 
-        #if DEBUG
-            let currentName = state.currentTrack?.name ?? "none"
-            let nextCount = state.nextTracks.count
-            let prevCount = state.previousTracks?.count ?? 0
-            print("[SpotifyPlayer] handleQueueCallback: current='\(currentName)', next=\(nextCount), prev=\(prevCount)")
-        #endif
+        let currentName = state.currentTrack?.name ?? "none"
+        let nextCount = state.nextTracks.count
+        let prevCount = state.previousTracks?.count ?? 0
+        debugLog("SpotifyPlayer", "handleQueueCallback: current='\(currentName)', next=\(nextCount), prev=\(prevCount)")
 
         queueSubject.send(state)
     } catch {
-        print("[SpotifyPlayer] Failed to parse queue JSON: \(error)")
-        #if DEBUG
-            let preview = String(jsonString.prefix(500))
-            print("[SpotifyPlayer] JSON preview: \(preview)")
-        #endif
+        debugLog("SpotifyPlayer", "Failed to parse queue JSON: \(error)")
+        debugLog("SpotifyPlayer", "JSON preview: \(String(jsonString.prefix(500)))")
     }
 }
 
@@ -663,9 +599,7 @@ enum SpotifyPlayer {
         // Skip full cleanup in soft reconnect mode - Rust soft_cleanup already cleared Session/Spirc
         // and we want to preserve the Player for uninterrupted audio
         if softReconnectMode {
-            #if DEBUG
-                print("[SpotifyPlayer] Soft reconnect mode - skipping full cleanup to preserve Player")
-            #endif
+            debugLog("SpotifyPlayer", "Soft reconnect mode - skipping full cleanup to preserve Player")
             softReconnectMode = false // Reset flag after use
         } else {
             // Full cleanup - necessary because Session instances cannot be reused after disconnection

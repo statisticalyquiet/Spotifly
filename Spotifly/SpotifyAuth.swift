@@ -262,11 +262,23 @@ enum SpotifyAuth {
             "client_id": SpotifyConfig.getClientId(),
         ])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            debugLog("SpotifyAuth", "Token refresh network error: \(error)")
+            throw SpotifyAuthError.refreshFailed
+        }
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200
-        else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            debugLog("SpotifyAuth", "Token refresh: invalid response type")
+            throw SpotifyAuthError.refreshFailed
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+            debugLog("SpotifyAuth", "Token refresh failed with status \(httpResponse.statusCode): \(body)")
             throw SpotifyAuthError.refreshFailed
         }
 

@@ -50,13 +50,11 @@ final class QueueService {
         // previousTracks is nil when from Web API (which doesn't provide history)
         let previousURIs = state.previousTracks?.map(\.uri)
 
-        #if DEBUG
-            if let prevCount = previousURIs?.count {
-                print("[QueueService] Queue updated from Mercury: prev=\(prevCount), current=\(currentURI != nil ? 1 : 0), next=\(nextURIs.count)")
-            } else {
-                print("[QueueService] Queue updated from Web API: current=\(currentURI != nil ? 1 : 0), next=\(nextURIs.count) (preserving previous)")
-            }
-        #endif
+        if let prevCount = previousURIs?.count {
+            debugLog("QueueService", "Queue updated from Mercury: prev=\(prevCount), current=\(currentURI != nil ? 1 : 0), next=\(nextURIs.count)")
+        } else {
+            debugLog("QueueService", "Queue updated from Web API: current=\(currentURI != nil ? 1 : 0), next=\(nextURIs.count) (preserving previous)")
+        }
 
         store.setQueue(previous: previousURIs, current: currentURI, next: nextURIs)
 
@@ -85,9 +83,7 @@ final class QueueService {
         let trackIdsToFetch = uniqueTrackIds.filter { store.tracks[$0] == nil }
 
         guard !trackIdsToFetch.isEmpty else {
-            #if DEBUG
-                print("[QueueService] All \(uniqueTrackIds.count) unique tracks already cached in store")
-            #endif
+            debugLog("QueueService", "All \(uniqueTrackIds.count) unique tracks already cached in store")
             // Update queue items from cached data
             updateNowPlayingMetadata()
             return
@@ -128,15 +124,14 @@ final class QueueService {
             return
         }
 
-        #if DEBUG
-            print("[QueueService] Fetching \(stillNeeded.count) tracks from Web API")
-        #endif
+        debugLog("QueueService", "Fetching \(stillNeeded.count) tracks from Web API")
 
         metadataFetchTask = Task { [weak self, tokenProvider] in
             guard let self else { return }
 
             do {
                 let accessToken = await tokenProvider()
+                debugLog("QueueService", "Using token: \(String(accessToken.prefix(20)))...")
                 let trackData = try await SpotifyAPI.fetchTracks(accessToken: accessToken, trackIds: stillNeeded)
 
                 guard !Task.isCancelled else { return }
@@ -163,17 +158,13 @@ final class QueueService {
                 // Store tracks in the global cache
                 store.upsertTracks(tracksToStore)
 
-                #if DEBUG
-                    print("[QueueService] Cached \(tracksToStore.count) tracks in store")
-                #endif
+                debugLog("QueueService", "Cached \(tracksToStore.count) tracks in store")
 
                 // Update queue items from store
                 updateNowPlayingMetadata()
 
             } catch {
-                #if DEBUG
-                    print("[QueueService] Failed to fetch track metadata: \(error)")
-                #endif
+                debugLog("QueueService", "Failed to fetch track metadata: \(error)")
             }
         }
 
@@ -191,12 +182,10 @@ final class QueueService {
             )
         }
 
-        #if DEBUG
-            let prevCount = store.previousTracks.count
-            let nextCount = store.nextTracks.count
-            let total = prevCount + (store.currentTrack != nil ? 1 : 0) + nextCount
-            print("[QueueService] Queue tracks resolved: \(total) with metadata (prev=\(prevCount), next=\(nextCount))")
-        #endif
+        let prevCount = store.previousTracks.count
+        let nextCount = store.nextTracks.count
+        let total = prevCount + (store.currentTrack != nil ? 1 : 0) + nextCount
+        debugLog("QueueService", "Queue tracks resolved: \(total) with metadata (prev=\(prevCount), next=\(nextCount))")
     }
 
     // MARK: - Favorites Loading

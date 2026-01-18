@@ -21,6 +21,9 @@ final class DeviceService {
 
     /// Load available Spotify Connect devices
     func loadDevices(accessToken: String) async {
+        // Deduplicate concurrent requests - just skip if already loading
+        guard !store.devicesIsLoading else { return }
+
         store.devicesIsLoading = true
         store.devicesErrorMessage = nil
 
@@ -34,6 +37,8 @@ final class DeviceService {
             } else {
                 store.activeDeviceId = nil
             }
+        } catch is CancellationError {
+            // Task was cancelled (e.g., view dismissed) - don't show error
         } catch let error as SpotifyAPIError {
             store.devicesErrorMessage = error.localizedDescription
         } catch {

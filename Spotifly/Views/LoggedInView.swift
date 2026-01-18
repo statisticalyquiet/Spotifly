@@ -433,13 +433,9 @@ struct LoggedInView: View {
     private func performSearch() {
         Task {
             let token = await session.validAccessToken()
-            #if DEBUG
-                print("[Search] Starting search for: \(searchText)")
-            #endif
+            debugLog("Search", "Starting search for: \(searchText)")
             await searchService.search(accessToken: token, query: searchText)
-            #if DEBUG
-                print("[Search] After search - results: \(store.searchResults != nil), error: \(store.searchErrorMessage ?? "nil")")
-            #endif
+            debugLog("Search", "After search - results: \(store.searchResults != nil), error: \(store.searchErrorMessage ?? "nil")")
             if store.searchResults != nil {
                 selectedNavigationItem = .searchResults
             }
@@ -492,9 +488,7 @@ struct LoggedInView: View {
             GeometryReader { geometry in
                 Color.clear
                     .task(id: geometry.size.width) {
-                        #if DEBUG
-                            print("[SidebarWidth] Updating sidebarWidth to: \(geometry.size.width)")
-                        #endif
+                        debugLog("SidebarWidth", "Updating sidebarWidth to: \(geometry.size.width)")
                         await MainActor.run {
                             sidebarWidth = geometry.size.width
                         }

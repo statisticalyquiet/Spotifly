@@ -42,6 +42,9 @@ final class SpotifySession {
     /// Continuation for callers waiting on a refresh in progress
     private var refreshWaiters: [CheckedContinuation<String, Never>] = []
 
+    /// Timestamp of last refresh failure (to prevent rapid retry loops)
+    private var lastRefreshFailure: Date?
+
     init(authResult: SpotifyAuthResult) {
         accessToken = authResult.accessToken
         refreshToken = authResult.refreshToken
@@ -65,15 +68,24 @@ final class SpotifySession {
 
         if bufferDate < expirationDate {
             // Token still valid for 5+ minutes
+            debugLog("SpotifySession", "Returning valid token: \(String(accessToken.prefix(20)))...")
             return accessToken
         }
 
         // Token expired or expiring soon - need to refresh
+        debugLog("SpotifySession", "Token expires in \(Int(expirationDate.timeIntervalSinceNow))s, attempting refresh")
+
         guard let refreshToken else {
             // No refresh token available, return current token and hope for the best
-            #if DEBUG
-                print("[SpotifySession] Token expiring but no refresh token available")
-            #endif
+            debugLog("SpotifySession", "Token expiring but no refresh token available")
+            return accessToken
+        }
+
+        // If refresh failed recently, don't retry immediately (prevents rapid retry loop)
+        if let lastFailure = lastRefreshFailure,
+           Date().timeIntervalSince(lastFailure) < 30
+        {
+            debugLog("SpotifySession", "Skipping refresh - failed \(Int(Date().timeIntervalSince(lastFailure)))s ago")
             return accessToken
         }
 
@@ -108,9 +120,8 @@ final class SpotifySession {
         case let .success(newResult):
             update(with: newResult)
             try? KeychainManager.saveAuthResult(newResult)
-            #if DEBUG
-                print("[SpotifySession] Token refreshed successfully")
-            #endif
+            lastRefreshFailure = nil
+            debugLog("SpotifySession", "Token refreshed successfully: \(String(accessToken.prefix(20)))...")
 
             // Resume all waiters with new token
             let token = accessToken
@@ -123,12 +134,15 @@ final class SpotifySession {
             return token
 
         case let .failure(error):
-            #if DEBUG
-                print("[SpotifySession] Token refresh failed: \(error)")
-            #endif
+            debugLog("SpotifySession", "Token refresh failed: \(error)")
+
+            // Record failure to prevent rapid retry loop
+            lastRefreshFailure = Date()
 
             // Resume waiters with current token (may be expired)
             let token = accessToken
+            let expiry = tokenObtainedAt.addingTimeInterval(TimeInterval(expiresIn))
+            debugLog("SpotifySession", "Returning old token: \(String(token.prefix(20)))... (expires in \(Int(expiry.timeIntervalSinceNow))s)")
             for waiter in refreshWaiters {
                 waiter.resume(returning: token)
             }
