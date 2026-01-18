@@ -2,6 +2,8 @@
 
 A lightweight Spotify player for macOS.
 
+**[Website](https://ralph.github.io/Spotifly/)** · **[Download](https://github.com/ralph/Spotifly/releases/latest)**
+
 > [!IMPORTANT]
 > **Spotify Client ID Required**
 > This app requires your own Spotify Client ID to function. See [Setting Up Your Client ID](#setting-up-your-client-id) below for instructions.
