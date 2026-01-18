@@ -63,8 +63,9 @@ case "$PLATFORM_NAME" in
         ;;
 esac
 
-# Copy the header file
+# Copy the header file and modulemap
 cp "$RUST_DIR/include/spotifly_rust.h" "$OUTPUT_DIR/include/"
+cp "$RUST_DIR/include/module.modulemap" "$OUTPUT_DIR/include/"
 
 echo "Build complete!"
 echo "Static library: $OUTPUT_DIR/lib/libspotifly_rust.a"

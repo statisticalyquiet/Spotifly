@@ -1,0 +1,5 @@
+module SpotiflyRust {
+    header "spotifly_rust.h"
+    link "spotifly_rust"
+    export *
+}
