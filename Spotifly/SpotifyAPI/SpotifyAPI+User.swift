@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import os
 
 extension SpotifyAPI {
     // MARK: - User Profile
@@ -14,9 +13,8 @@ extension SpotifyAPI {
     /// Gets the current user's Spotify user ID
     static func getCurrentUserId(accessToken: String) async throws -> String {
         let urlString = "\(baseURL)/me"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -51,9 +49,8 @@ extension SpotifyAPI {
     /// Fetches the user's recently played tracks
     static func fetchRecentlyPlayed(accessToken: String, limit: Int = 50) async throws -> RecentlyPlayedResponse {
         let urlString = "\(baseURL)/me/player/recently-played?limit=\(limit)"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI

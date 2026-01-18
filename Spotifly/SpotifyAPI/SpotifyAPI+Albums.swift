@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import os
 
 extension SpotifyAPI {
     // MARK: - Album Details
@@ -14,9 +13,8 @@ extension SpotifyAPI {
     /// Fetches a single album's details from Spotify Web API
     static func fetchAlbumDetails(accessToken: String, albumId: String) async throws -> APIAlbum {
         let urlString = "\(baseURL)/albums/\(albumId)?fields=id,name,uri,total_tracks,release_date,artists(id,name),images,tracks(items(duration_ms)),external_urls(spotify)"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -53,9 +51,8 @@ extension SpotifyAPI {
     /// Fetches user's saved albums from Spotify Web API
     static func fetchUserAlbums(accessToken: String, limit: Int = 50, offset: Int = 0) async throws -> AlbumsResponse {
         let urlString = "\(baseURL)/me/albums?limit=\(limit)&offset=\(offset)&fields=items(album(id,name,uri,total_tracks,release_date,album_type,artists(name),images,tracks(items(duration_ms)),external_urls(spotify))),total,next"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -103,9 +100,8 @@ extension SpotifyAPI {
         limit: Int = 50,
     ) async throws -> [APIAlbum] {
         let urlString = "\(baseURL)/artists/\(artistId)/albums?include_groups=album,single&market=from_token&limit=\(limit)"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -142,9 +138,8 @@ extension SpotifyAPI {
     /// Removes an album from the user's library
     static func removeUserAlbum(accessToken: String, albumId: String) async throws {
         let urlString = "\(baseURL)/me/albums?ids=\(albumId)"
-        #if DEBUG
-            apiLogger.debug("[DELETE] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[DELETE] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -177,9 +172,8 @@ extension SpotifyAPI {
     /// Saves an album to the user's library
     static func saveUserAlbum(accessToken: String, albumId: String) async throws {
         let urlString = "\(baseURL)/me/albums?ids=\(albumId)"
-        #if DEBUG
-            apiLogger.debug("[PUT] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[PUT] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -212,9 +206,8 @@ extension SpotifyAPI {
     /// Fetches new album releases from Spotify Web API
     static func fetchNewReleases(accessToken: String, limit: Int = 50, offset: Int = 0) async throws -> NewReleasesResponse {
         let urlString = "\(baseURL)/browse/new-releases?limit=\(limit)&offset=\(offset)"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI

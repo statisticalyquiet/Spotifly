@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import os
 
 extension SpotifyAPI {
     // MARK: - Devices
@@ -14,9 +13,8 @@ extension SpotifyAPI {
     /// Fetches available Spotify Connect devices
     static func fetchAvailableDevices(accessToken: String) async throws -> DevicesResponse {
         let urlString = "\(baseURL)/me/player/devices"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -66,9 +64,8 @@ extension SpotifyAPI {
     /// - Returns: QueueResponse containing current track and queue
     static func fetchQueue(accessToken: String) async throws -> QueueResponse {
         let urlString = "\(baseURL)/me/player/queue"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI

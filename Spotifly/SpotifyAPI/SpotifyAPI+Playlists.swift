@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import os
 
 extension SpotifyAPI {
     // MARK: - User Playlists
@@ -14,9 +13,8 @@ extension SpotifyAPI {
     /// Fetches user's playlists from Spotify Web API
     static func fetchUserPlaylists(accessToken: String, limit: Int = 50, offset: Int = 0) async throws -> PlaylistsResponse {
         let urlString = "\(baseURL)/me/playlists?limit=\(limit)&offset=\(offset)&fields=items(id,name,uri,description,images,tracks(total,items(track(duration_ms))),public,owner(id,display_name)),total,next"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -60,9 +58,8 @@ extension SpotifyAPI {
     /// Fetches a single playlist's details from Spotify Web API
     static func fetchPlaylistDetails(accessToken: String, playlistId: String) async throws -> APIPlaylist {
         let urlString = "\(baseURL)/playlists/\(playlistId)?fields=id,name,description,images,tracks(total,items(track(duration_ms))),uri,public,owner(id,display_name)&market=from_token"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -105,9 +102,8 @@ extension SpotifyAPI {
         isPublic: Bool = false,
     ) async throws -> APIPlaylist {
         let urlString = "\(baseURL)/users/\(userId)/playlists"
-        #if DEBUG
-            apiLogger.debug("[POST] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[POST] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -155,9 +151,8 @@ extension SpotifyAPI {
         trackUris: [String],
     ) async throws {
         let urlString = "\(baseURL)/playlists/\(playlistId)/tracks"
-        #if DEBUG
-            apiLogger.debug("[POST] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[POST] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -199,9 +194,8 @@ extension SpotifyAPI {
         description: String? = nil,
     ) async throws {
         let urlString = "\(baseURL)/playlists/\(playlistId)"
-        #if DEBUG
-            apiLogger.debug("[PUT] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[PUT] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -240,9 +234,8 @@ extension SpotifyAPI {
     /// Deletes (unfollows) a playlist
     static func deletePlaylist(accessToken: String, playlistId: String) async throws {
         let urlString = "\(baseURL)/playlists/\(playlistId)/followers"
-        #if DEBUG
-            apiLogger.debug("[DELETE] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[DELETE] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -275,9 +268,8 @@ extension SpotifyAPI {
     /// Follows (saves) a playlist to the user's library
     static func followPlaylist(accessToken: String, playlistId: String) async throws {
         let urlString = "\(baseURL)/playlists/\(playlistId)/followers"
-        #if DEBUG
-            apiLogger.debug("[PUT] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[PUT] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -318,9 +310,8 @@ extension SpotifyAPI {
         trackUris: [String],
     ) async throws {
         let urlString = "\(baseURL)/playlists/\(playlistId)/tracks"
-        #if DEBUG
-            apiLogger.debug("[DELETE] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[DELETE] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -364,9 +355,8 @@ extension SpotifyAPI {
         rangeLength: Int = 1,
     ) async throws {
         let urlString = "\(baseURL)/playlists/\(playlistId)/tracks"
-        #if DEBUG
-            apiLogger.debug("[PUT] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[PUT] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -411,9 +401,8 @@ extension SpotifyAPI {
         trackUris: [String],
     ) async throws {
         let urlString = "\(baseURL)/playlists/\(playlistId)/tracks"
-        #if DEBUG
-            apiLogger.debug("[PUT] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[PUT] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI

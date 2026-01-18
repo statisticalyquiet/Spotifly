@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import os
 
 extension SpotifyAPI {
     // MARK: - Search
@@ -21,9 +20,7 @@ extension SpotifyAPI {
         let typesString = types.map(\.rawValue).joined(separator: ",")
         let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         let urlString = "\(baseURL)/search?q=\(encodedQuery)&type=\(typesString)&limit=\(limit)&market=from_token"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -120,12 +117,10 @@ extension SpotifyAPI {
                     tracks: tracks,
                 )
             } catch {
-                #if DEBUG
-                    apiLogger.error("[Search] Decoding error: \(error)")
-                    if let jsonString = String(data: data, encoding: .utf8) {
-                        apiLogger.error("[Search] Response: \(jsonString.prefix(500))")
-                    }
-                #endif
+                debugLog("SpotifyAPI", "[Search] Decoding error: \(error)")
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    debugLog("SpotifyAPI", "[Search] Response: \(String(jsonString.prefix(500)))")
+                }
                 throw SpotifyAPIError.invalidResponse
             }
         case 401:

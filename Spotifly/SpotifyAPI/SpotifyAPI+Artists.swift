@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import os
 
 extension SpotifyAPI {
     // MARK: - Artist Details
@@ -14,9 +13,8 @@ extension SpotifyAPI {
     /// Fetches a single artist's details from Spotify Web API
     static func fetchArtistDetails(accessToken: String, artistId: String) async throws -> APIArtist {
         let urlString = "\(baseURL)/artists/\(artistId)?fields=id,name,uri,genres,followers(total),images"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -59,9 +57,8 @@ extension SpotifyAPI {
         if let cursor = after {
             urlString += "&after=\(cursor)"
         }
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -105,9 +102,8 @@ extension SpotifyAPI {
     /// Unfollows an artist (removes from user's followed artists)
     static func unfollowArtist(accessToken: String, artistId: String) async throws {
         let urlString = "\(baseURL)/me/following?type=artist&ids=\(artistId)"
-        #if DEBUG
-            apiLogger.debug("[DELETE] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[DELETE] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -140,9 +136,8 @@ extension SpotifyAPI {
     /// Follows an artist (adds to user's followed artists)
     static func followArtist(accessToken: String, artistId: String) async throws {
         let urlString = "\(baseURL)/me/following?type=artist&ids=\(artistId)"
-        #if DEBUG
-            apiLogger.debug("[PUT] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[PUT] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI
@@ -180,9 +175,8 @@ extension SpotifyAPI {
         offset: Int = 0,
     ) async throws -> TopArtistsResponse {
         let urlString = "\(baseURL)/me/top/artists?time_range=\(timeRange.rawValue)&limit=\(limit)&offset=\(offset)"
-        #if DEBUG
-            apiLogger.debug("[GET] \(urlString)")
-        #endif
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
 
         guard let url = URL(string: urlString) else {
             throw SpotifyAPIError.invalidURI

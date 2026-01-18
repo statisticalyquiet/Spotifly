@@ -6,9 +6,6 @@
 //
 
 import Foundation
-import os.log
-
-let apiLogger = Logger(subsystem: "com.spotifly.app", category: "SpotifyAPI")
 
 /// Spotify item types for generating external URLs
 enum SpotifyItemType: String {
