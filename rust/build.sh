@@ -9,9 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUST_DIR="$SCRIPT_DIR"
 OUTPUT_DIR="$SCRIPT_DIR/../build/rust"
 
-# Use rustup-installed cargo if available, otherwise use system cargo
+# Add cargo to PATH - check rustup first, then Homebrew
 if [ -f "$HOME/.cargo/bin/cargo" ]; then
     export PATH="$HOME/.cargo/bin:$PATH"
+elif [ -f "/opt/homebrew/bin/cargo" ]; then
+    export PATH="/opt/homebrew/bin:$PATH"
 fi
 
 # Determine what platforms to build for based on PLATFORM_NAME environment variable (set by Xcode)
