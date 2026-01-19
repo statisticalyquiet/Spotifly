@@ -120,12 +120,11 @@ final class AppStore {
 
     var devicesIsLoading = false
     var devicesErrorMessage: String?
-    var activeDeviceId: String? // Tracks which device is currently active
 
-    // MARK: - Connection State (from librespot)
+    // MARK: - Connection State
 
-    /// Current connection state from librespot
-    private(set) var connectionState: LibrespotConnectionState?
+    /// Our connection to Spotify (single source of truth for connection info)
+    private(set) var connection: SpotifyConnection?
 
     // MARK: - Computed Properties (Derived State)
 
@@ -214,31 +213,24 @@ final class AppStore {
         queue.previousTracks.count
     }
 
-    /// Active device (if any)
+    /// Active device (if any) - derived from devices dictionary
     var activeDevice: Device? {
         devices.values.first { $0.isActive }
     }
 
-    /// Own device info computed from connection state
-    var ownDevice: OwnDeviceInfo? {
-        guard let state = connectionState,
-              let deviceId = state.deviceId
-        else { return nil }
+    /// Active device ID - computed from devices (no stored duplication)
+    var activeDeviceId: String? {
+        activeDevice?.id
+    }
 
-        let connectedSince: Date? = if let ms = state.connectedSinceMs {
-            Date(timeIntervalSince1970: Double(ms) / 1000.0)
-        } else {
-            nil
-        }
+    /// Our device ID - computed from connection
+    var ownDeviceId: String? {
+        connection?.deviceId
+    }
 
-        return OwnDeviceInfo(
-            id: deviceId,
-            name: state.deviceName,
-            isConnected: state.sessionConnected,
-            connectionId: state.sessionConnectionId,
-            connectedSince: connectedSince,
-            reconnectAttempts: state.reconnectAttempt,
-        )
+    /// Whether we're connected to Spotify
+    var isConnected: Bool {
+        connection?.isConnected ?? false
     }
 
     // MARK: - Entity Mutations
@@ -510,9 +502,9 @@ final class AppStore {
 
     // MARK: - Connection State Actions
 
-    /// Update connection state from librespot
-    func setConnectionState(_ state: LibrespotConnectionState?) {
-        connectionState = state
+    /// Update connection state
+    func setConnection(_ connection: SpotifyConnection?) {
+        self.connection = connection
     }
 
     // MARK: - Debug
@@ -563,8 +555,7 @@ final class AppStore {
                     let errorMessage: String?
                 }
 
-                let connectionState: LibrespotConnectionState?
-                let ownDevice: OwnDeviceInfo?
+                let connection: SpotifyConnection?
             }
 
             let snapshot = StoreSnapshot(
@@ -595,8 +586,7 @@ final class AppStore {
                     errorMessage: queue.errorMessage,
                 ),
                 activeDeviceId: activeDeviceId,
-                connectionState: connectionState,
-                ownDevice: ownDevice,
+                connection: connection,
             )
 
             let encoder = JSONEncoder()

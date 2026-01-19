@@ -30,13 +30,7 @@ final class DeviceService {
         do {
             let response = try await SpotifyAPI.fetchAvailableDevices(accessToken: accessToken)
             store.upsertDevices(response.devices)
-
-            // Track active device ID
-            if let activeDevice = response.devices.first(where: { $0.isActive }) {
-                store.activeDeviceId = activeDevice.id
-            } else {
-                store.activeDeviceId = nil
-            }
+            // activeDeviceId is now computed from devices, no need to set it
         } catch is CancellationError {
             // Task was cancelled (e.g., view dismissed) - don't show error
         } catch let error as SpotifyAPIError {

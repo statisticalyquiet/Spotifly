@@ -123,14 +123,14 @@ struct ConnectionStatusView: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        if let state = store.connectionState {
+        if let connection = store.connection {
             VStack(alignment: .leading, spacing: 12) {
                 // Overall status header
                 HStack {
                     Text("Connection Status")
                         .font(.headline)
                     Spacer()
-                    statusBadge(isConnected: state.sessionConnected && state.spircReady)
+                    statusBadge(isConnected: connection.isConnected && connection.spircReady)
                 }
 
                 Divider()
@@ -139,14 +139,14 @@ struct ConnectionStatusView: View {
                 VStack(spacing: 8) {
                     ConnectionStatusRow(
                         label: "Session",
-                        isConnected: state.sessionConnected,
-                        detail: state.sessionConnectionId.map { truncateId($0) },
+                        isConnected: connection.isConnected,
+                        detail: connection.connectionId.map { truncateId($0) },
                     )
 
                     ConnectionStatusRow(
                         label: "Spirc",
-                        isConnected: state.spircReady,
-                        detail: state.spircReady ? "Ready" : "Not Ready",
+                        isConnected: connection.spircReady,
+                        detail: connection.spircReady ? "Ready" : "Not Ready",
                     )
                 }
 
@@ -154,18 +154,18 @@ struct ConnectionStatusView: View {
 
                 // Metadata
                 VStack(spacing: 8) {
-                    if state.sessionConnected, let connectedSinceMs = state.connectedSinceMs {
-                        UptimeDisplay(connectedSince: Date(timeIntervalSince1970: Double(connectedSinceMs) / 1000.0))
+                    if connection.isConnected, let connectedSince = connection.connectedSince {
+                        UptimeDisplay(connectedSince: connectedSince)
                     } else {
                         MetadataRow(label: "Uptime", value: "--")
                     }
 
                     MetadataRow(
                         label: "Reconnect Attempts",
-                        value: "\(state.reconnectAttempt)",
+                        value: "\(connection.reconnectAttempts)",
                     )
 
-                    if let deviceId = state.deviceId {
+                    if let deviceId = connection.deviceId {
                         MetadataRow(
                             label: "Device ID",
                             value: truncateId(deviceId),
@@ -174,7 +174,7 @@ struct ConnectionStatusView: View {
                 }
 
                 // Error banner (if present)
-                if let lastError = state.lastError {
+                if let lastError = connection.lastError {
                     Divider()
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")

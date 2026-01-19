@@ -195,16 +195,19 @@ struct Device: Identifiable, Sendable, Hashable, Encodable {
     let volumePercent: Int?
 }
 
-// MARK: - Own Device Info
+// MARK: - Spotify Connection
 
-/// Information about the local Spotifly device (from librespot).
-struct OwnDeviceInfo: Sendable, Encodable {
-    let id: String
-    let name: String
+/// Our app's connection state to Spotify (single source of truth for connection info).
+/// Converted from LibrespotConnectionState at the FFI boundary.
+struct SpotifyConnection: Sendable, Equatable, Encodable {
+    let deviceId: String?
+    let deviceName: String
     let isConnected: Bool
     let connectionId: String?
     let connectedSince: Date?
+    let spircReady: Bool
     let reconnectAttempts: UInt32
+    let lastError: String?
 }
 
 // MARK: - Queue Models
