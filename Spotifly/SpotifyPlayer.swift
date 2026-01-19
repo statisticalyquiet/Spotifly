@@ -100,6 +100,17 @@ struct QueueChangedNotification: Sendable {
     nonisolated let trackUri: String
 }
 
+/// Context resolved notification containing track URIs when a context (playlist/album) is loaded
+struct ContextResolvedNotification: Sendable {
+    nonisolated let contextUri: String
+    nonisolated let currentTrackUri: String?
+    nonisolated let currentTrackProvider: String?
+    nonisolated let nextTrackUris: [String]
+    nonisolated let nextTrackProviders: [String]
+    nonisolated let prevTrackUris: [String]
+    nonisolated let prevTrackProviders: [String]
+}
+
 /// Connection state from librespot (nonisolated for C callback compatibility)
 struct LibrespotConnectionState: Sendable, Equatable, Encodable {
     nonisolated let sessionConnected: Bool
@@ -117,6 +128,9 @@ private nonisolated(unsafe) let queueChangedSubject = PassthroughSubject<QueueCh
 
 /// Global subject for connection state updates (nonisolated for C callback access)
 private nonisolated(unsafe) let connectionStateSubject = CurrentValueSubject<LibrespotConnectionState?, Never>(nil)
+
+/// Global subject for context resolved notifications (nonisolated for C callback access)
+private nonisolated(unsafe) let contextResolvedSubject = PassthroughSubject<ContextResolvedNotification, Never>()
 
 /// Registers the queue callback with Rust (must be called from nonisolated context)
 private nonisolated func registerQueueCallback() {
@@ -265,6 +279,54 @@ private nonisolated func handleQueueChangedCallback(_ jsonPtr: UnsafePointer<CCh
 
     } catch {
         debugLog("SpotifyPlayer", "Failed to parse queue changed JSON: \(error)")
+    }
+}
+
+/// Registers the context resolved callback with Rust (fires when a context is resolved)
+private nonisolated func registerContextResolvedCallback() {
+    spotifly_register_context_resolved_callback { jsonPtr in
+        handleContextResolvedCallback(jsonPtr)
+    }
+}
+
+/// C callback for context resolved notifications from Rust
+/// Fires immediately when a context (playlist, album, etc.) is resolved locally
+private nonisolated func handleContextResolvedCallback(_ jsonPtr: UnsafePointer<CChar>?) {
+    guard let jsonPtr else {
+        debugLog("SpotifyPlayer", "handleContextResolvedCallback: jsonPtr is nil")
+        return
+    }
+
+    let jsonString = String(cString: jsonPtr)
+    debugLog("SpotifyPlayer", "Context resolved callback: \(jsonString.prefix(200))...")
+
+    guard let data = jsonString.data(using: .utf8) else {
+        return
+    }
+
+    do {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        let notification = ContextResolvedNotification(
+            contextUri: json["context_uri"] as? String ?? "",
+            currentTrackUri: json["current_track_uri"] as? String,
+            currentTrackProvider: json["current_track_provider"] as? String,
+            nextTrackUris: json["next_track_uris"] as? [String] ?? [],
+            nextTrackProviders: json["next_track_providers"] as? [String] ?? [],
+            prevTrackUris: json["prev_track_uris"] as? [String] ?? [],
+            prevTrackProviders: json["prev_track_providers"] as? [String] ?? [],
+        )
+
+        debugLog(
+            "SpotifyPlayer",
+            "Context resolved: \(notification.contextUri), next=\(notification.nextTrackUris.count), prev=\(notification.prevTrackUris.count)",
+        )
+
+        contextResolvedSubject.send(notification)
+    } catch {
+        debugLog("SpotifyPlayer", "Failed to parse context resolved JSON: \(error)")
     }
 }
 
@@ -479,6 +541,7 @@ enum SpotifyPlayer {
         registerSessionDisconnectedCallback()
         registerSessionConnectedCallback()
         registerConnectionStateCallback()
+        registerContextResolvedCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
@@ -557,6 +620,13 @@ enum SpotifyPlayer {
     /// Subscribe to this to update the connection status dashboard.
     static var connectionState: AnyPublisher<LibrespotConnectionState?, Never> {
         connectionStateSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher for context resolved notifications.
+    /// Fires immediately when a context (playlist, album, etc.) is resolved locally.
+    /// Contains the full list of track URIs in the context.
+    static var contextResolved: AnyPublisher<ContextResolvedNotification, Never> {
+        contextResolvedSubject.eraseToAnyPublisher()
     }
 
     /// Returns the current connection state synchronously.

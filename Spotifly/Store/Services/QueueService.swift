@@ -16,6 +16,7 @@ final class QueueService {
     private let store: AppStore
     private let tokenProvider: () async -> String
     private var queueSubscription: AnyCancellable?
+    private var contextResolvedSubscription: AnyCancellable?
     private var metadataFetchTask: Task<Void, Never>?
     private var pendingTrackIds: Set<String> = []
     private var debounceTask: Task<Void, Never>?
@@ -24,11 +25,13 @@ final class QueueService {
         self.store = store
         self.tokenProvider = tokenProvider
         setupQueueSubscription()
+        setupContextResolvedSubscription()
     }
 
-    // MARK: - Queue Subscription
+    // MARK: - Queue Subscriptions
 
     /// Subscribe to queue updates from Spirc (via Mercury protocol)
+    /// This fires after round-trip to Spotify servers
     private func setupQueueSubscription() {
         queueSubscription = SpotifyPlayer.queue
             .receive(on: DispatchQueue.main)
@@ -37,7 +40,53 @@ final class QueueService {
             }
     }
 
-    /// Handle queue update from Spirc callback or Web API
+    /// Subscribe to context resolved events from Spirc
+    /// This fires immediately when a context is resolved locally (before Spotify servers acknowledge)
+    private func setupContextResolvedSubscription() {
+        contextResolvedSubscription = SpotifyPlayer.contextResolved
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                self?.handleContextResolved(notification)
+            }
+    }
+
+    /// Handle context resolved notification (fires immediately when context is loaded)
+    private func handleContextResolved(_ notification: ContextResolvedNotification) {
+        debugLog("QueueService", "Context resolved: \(notification.contextUri), next=\(notification.nextTrackUris.count), prev=\(notification.prevTrackUris.count)")
+
+        // Convert URIs to QueueEntries
+        func toQueueEntry(uri: String, provider: String) -> QueueEntry? {
+            guard let trackId = SpotifyAPI.parseTrackURI(uri) else { return nil }
+            return QueueEntry(trackId: trackId, provider: TrackProvider(from: provider))
+        }
+
+        // Current track
+        let currentEntry: QueueEntry? = if let uri = notification.currentTrackUri,
+                                           let provider = notification.currentTrackProvider
+        {
+            toQueueEntry(uri: uri, provider: provider)
+        } else {
+            nil
+        }
+
+        // Next tracks (zip URIs with providers)
+        let nextEntries: [QueueEntry] = zip(notification.nextTrackUris, notification.nextTrackProviders)
+            .compactMap { toQueueEntry(uri: $0, provider: $1) }
+
+        // Previous tracks (zip URIs with providers)
+        let prevEntries: [QueueEntry] = zip(notification.prevTrackUris, notification.prevTrackProviders)
+            .compactMap { toQueueEntry(uri: $0, provider: $1) }
+
+        debugLog("QueueService", "Context resolved queue: prev=\(prevEntries.count), current=\(currentEntry != nil ? 1 : 0), next=\(nextEntries.count)")
+
+        store.setQueue(previous: prevEntries, current: currentEntry, next: nextEntries)
+
+        // Fetch track metadata for IDs not already in store
+        let allIds = prevEntries.map(\.trackId) + (currentEntry.map { [$0.trackId] } ?? []) + nextEntries.map(\.trackId)
+        fetchTrackMetadata(for: allIds)
+    }
+
+    /// Handle queue update from Spirc callback (Mercury protocol)
     private func handleQueueUpdate(_ queueState: QueueState?) {
         guard let state = queueState else {
             store.setQueue(previous: [], current: nil, next: [])
