@@ -1882,10 +1882,19 @@ pub extern "C" fn spotifly_add_to_queue(track_uri: *const c_char) -> i32 {
         return e;
     }
 
+    // Parse string to SpotifyUri
+    let spotify_uri = match parse_spotify_uri(&uri_str) {
+        Ok(uri) => uri,
+        Err(e) => {
+            debug!("Add to queue error: {}", e);
+            return -1;
+        }
+    };
+
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => {
-            match spirc.add_to_queue(uri_str) {
+            match spirc.add_to_queue(spotify_uri) {
                 Ok(_) => {
                     debug!("[Spotifly] add_to_queue succeeded");
                     0

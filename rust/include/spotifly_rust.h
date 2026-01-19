@@ -202,11 +202,13 @@ int32_t spotifly_transfer_to_local(void);
 /// @param to_device_id The target device ID to transfer playback to
 int32_t spotifly_transfer_playback(const char* to_device_id);
 
-/// Adds a track to the queue.
+/// Adds content to the queue.
+/// Supports tracks, episodes, albums, playlists, artists, and shows.
+/// For albums/playlists/artists/shows, all tracks/episodes are resolved and queued.
 /// Returns 0 on success, -1 on error.
 ///
-/// @param track_uri Spotify track URI (e.g., "spotify:track:xxx")
-int32_t spotifly_add_to_queue(const char* track_uri);
+/// @param uri Spotify URI (e.g., "spotify:track:xxx", "spotify:album:xxx")
+int32_t spotifly_add_to_queue(const char* uri);
 
 // ============================================================================
 // Playback settings (take effect on next player initialization)
