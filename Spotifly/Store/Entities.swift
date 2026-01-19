@@ -223,7 +223,7 @@ enum TrackProvider: String, Codable, Sendable {
         case "context": self = .context
         case "autoplay": self = .autoplay
         case "unavailable": self = .unavailable
-        default: self = .context // Default to context for unknown values
+        default: self = .unavailable // Unknown provider values treated as unavailable
         }
     }
 }

@@ -140,9 +140,6 @@ struct LoggedInView: View {
 
             _ = await (favorites, topArtists, newReleases, recentlyPlayed)
 
-            // Set token provider for queue fetching on track changes
-            SpotifyPlayer.setTokenProvider { await session.validAccessToken() }
-
             // Set token provider for automatic reinitialization on session disconnect
             playbackViewModel.setTokenProvider { await session.validAccessToken() }
 
@@ -543,9 +540,6 @@ struct LoggedInView: View {
 
         case .speakers:
             await deviceService.loadDevices(accessToken: token)
-
-        case .queue:
-            await SpotifyPlayer.refreshQueue()
 
         default:
             break

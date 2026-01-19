@@ -55,27 +55,13 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
         self.externalUrl = externalUrl
         self.provider = provider
     }
-
-    /// Create from Spotify API APITrack (Web API doesn't provide provider, defaults to "context")
-    @MainActor init(from track: APITrack, provider: String = "context") {
-        id = track.uri
-        uri = track.uri
-        name = track.name
-        artistName = track.artistName
-        imageURLString = track.imageURL?.absoluteString ?? ""
-        durationMs = UInt32(track.durationMs)
-        albumId = track.albumId
-        artistId = track.artistId
-        externalUrl = track.externalUrl ?? spotifyExternalUrl(type: .track, id: track.id)
-        self.provider = provider
-    }
 }
 
 /// Queue state containing current, next, and previous tracks (nonisolated for C callback compatibility)
 struct QueueState: Sendable {
     nonisolated let currentTrack: QueueItem?
     nonisolated let nextTracks: [QueueItem]
-    /// Previous tracks (nil when from Web API, which doesn't provide history)
+    /// Previous tracks from Mercury/Spirc
     nonisolated let previousTracks: [QueueItem]?
 }
 
@@ -131,9 +117,6 @@ private nonisolated(unsafe) let queueChangedSubject = PassthroughSubject<QueueCh
 
 /// Global subject for connection state updates (nonisolated for C callback access)
 private nonisolated(unsafe) let connectionStateSubject = CurrentValueSubject<LibrespotConnectionState?, Never>(nil)
-
-/// Token provider for fetching queue from Web API (set during initialize)
-private nonisolated(unsafe) var stateUpdateTokenProvider: (@Sendable () async -> String)?
 
 /// Registers the queue callback with Rust (must be called from nonisolated context)
 private nonisolated func registerQueueCallback() {
@@ -280,12 +263,6 @@ private nonisolated func handleQueueChangedCallback(_ jsonPtr: UnsafePointer<CCh
         let notification = QueueChangedNotification(trackUri: trackUri)
         queueChangedSubject.send(notification)
 
-        // Refresh queue from Web API to update the UI
-        // Add a small delay to let Spotify's servers process the queue change
-        Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            await fetchAndEmitQueueState()
-        }
     } catch {
         debugLog("SpotifyPlayer", "Failed to parse queue changed JSON: \(error)")
     }
@@ -320,99 +297,8 @@ private nonisolated func handleSessionConnectedCallback() {
 }
 
 /// C callback for state update notifications from Rust
-/// Triggers a Web API fetch to get the current queue state
 private nonisolated func handleStateUpdateCallback() {
-    debugLog("SpotifyPlayer", "State update callback triggered - fetching queue from Web API")
-
-    // Launch async task to fetch queue
-    // Add a small delay to let Spotify's servers process the state change
-    Task {
-        try? await Task.sleep(for: .milliseconds(500))
-        await fetchAndEmitQueueState()
-    }
-}
-
-/// Fetches queue from Spotify Web API and emits via queueSubject
-/// - Parameter retryOnEmpty: If true and queue is empty but has current track, retry after delay
-private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
-    guard let tokenProvider = stateUpdateTokenProvider else {
-        debugLog("SpotifyPlayer", "No token provider set for queue fetch")
-        return
-    }
-
-    let token = await tokenProvider()
-
-    do {
-        let response = try await SpotifyAPI.fetchQueue(accessToken: token)
-
-        // Convert TrackCodable to QueueItem
-        let currentTrack = response.currentlyPlaying.map { track -> QueueItem in
-            QueueItem(
-                id: track.uri,
-                uri: track.uri,
-                name: track.name,
-                artistName: track.artists?.first?.name ?? "Unknown Artist",
-                imageURLString: track.album?.images?.first?.url ?? "",
-                durationMs: UInt32(track.durationMs),
-                albumId: track.album?.id,
-                artistId: track.artists?.first?.id,
-                externalUrl: track.externalUrls?.spotify,
-                provider: "context", // Web API doesn't provide provider info
-            )
-        }
-
-        let nextTracks = response.queue.map { track -> QueueItem in
-            QueueItem(
-                id: track.uri,
-                uri: track.uri,
-                name: track.name,
-                artistName: track.artists?.first?.name ?? "Unknown Artist",
-                imageURLString: track.album?.images?.first?.url ?? "",
-                durationMs: UInt32(track.durationMs),
-                albumId: track.album?.id,
-                artistId: track.artists?.first?.id,
-                externalUrl: track.externalUrls?.spotify,
-                provider: "queue", // Items in queue array are manually queued
-            )
-        }
-
-        let queueState = QueueState(
-            currentTrack: currentTrack,
-            nextTracks: nextTracks,
-            previousTracks: nil, // Web API doesn't provide history
-        )
-
-        queueSubject.send(queueState)
-
-        debugLog("SpotifyPlayer", "Queue fetched from Web API: current=\(currentTrack?.name ?? "none"), next=\(nextTracks.count) tracks")
-
-        // If we have a current track but empty queue, retry after delay (device activation settling)
-        if retryOnEmpty, currentTrack != nil, nextTracks.isEmpty {
-            debugLog("SpotifyPlayer", "Queue empty with current track - retrying after delay")
-            try? await Task.sleep(for: .milliseconds(500))
-            await fetchAndEmitQueueState(retryOnEmpty: false)
-            return
-        }
-
-        // Also emit playback state if we have a current track
-        if let current = response.currentlyPlaying {
-            // Preserve positionMs and shuffle from previous state (not available from queue endpoint)
-            let previousState = playbackStateSubject.value
-            let playbackState = PlaybackState(
-                isPlaying: true, // Assume playing since track changed
-                isPaused: false,
-                trackUri: current.uri,
-                positionMs: previousState?.positionMs ?? 0,
-                durationMs: Int64(current.durationMs),
-                shuffle: previousState?.shuffle ?? false,
-                repeatTrack: previousState?.repeatTrack ?? false,
-                repeatContext: previousState?.repeatContext ?? false,
-            )
-            playbackStateSubject.send(playbackState)
-        }
-    } catch {
-        debugLog("SpotifyPlayer", "Failed to fetch queue from Web API: \(error)")
-    }
+    debugLog("SpotifyPlayer", "State update callback triggered")
 }
 
 /// C callback for playback state updates from Rust
@@ -473,7 +359,7 @@ private nonisolated func parseQueueItem(from dict: [String: Any]) -> QueueItem? 
         albumId: nil,
         artistId: nil,
         externalUrl: nil,
-        provider: dict["provider"] as? String ?? "context",
+        provider: dict["provider"] as? String ?? "unavailable",
     )
 }
 
@@ -578,12 +464,6 @@ private let errorNeedsReinit: Int32 = -2
 enum SpotifyPlayer {
     /// Flag indicating soft reconnect mode (preserves Player during reinit)
     private nonisolated(unsafe) static var softReconnectMode = false
-
-    /// Sets the token provider used for Web API calls (e.g., fetching queue on track change).
-    /// Should be called before initialize() for best results.
-    static func setTokenProvider(_ provider: @escaping @Sendable () async -> String) {
-        stateUpdateTokenProvider = provider
-    }
 
     /// Initializes the player with the given access token.
     /// Must be called before any playback operations.
@@ -703,12 +583,6 @@ enum SpotifyPlayer {
             lastError: json["last_error"] as? String,
             connectedSinceMs: (json["connected_since_ms"] as? NSNumber)?.uint64Value,
         )
-    }
-
-    /// Refreshes the queue from Spotify Web API.
-    /// Call this to manually update the queue display.
-    static func refreshQueue() async {
-        await fetchAndEmitQueueState()
     }
 
     /// Syncs playback settings from UserDefaults to the Rust player
