@@ -330,7 +330,11 @@ final class PlaybackViewModel {
 
     func resume() {
         SpotifyPlayer.resume()
-        // State update will come from Mercury callback
+        // Don't call syncPositionAnchor() - Rust returns 0 immediately after resume
+        // Keep the current positionAnchorMs (correct from paused state), just update the time
+        positionAnchorTime = CACurrentMediaTime()
+        isPlaying = true
+        updateNowPlayingInfo(forcePositionUpdate: true)
     }
 
     /// Always returns true - Web API handles next track availability
@@ -366,6 +370,8 @@ final class PlaybackViewModel {
                 guard let self else { return }
                 if !self.isPlaying {
                     SpotifyPlayer.resume()
+                    // Keep current position anchor, just update time
+                    self.positionAnchorTime = CACurrentMediaTime()
                     self.isPlaying = true
                     self.updateNowPlayingInfo(forcePositionUpdate: true)
                 }
@@ -395,6 +401,8 @@ final class PlaybackViewModel {
                     self.isPlaying = false
                 } else {
                     SpotifyPlayer.resume()
+                    // Keep current position anchor, just update time
+                    self.positionAnchorTime = CACurrentMediaTime()
                     self.isPlaying = true
                 }
                 self.updateNowPlayingInfo(forcePositionUpdate: true)
@@ -669,6 +677,14 @@ final class PlaybackViewModel {
                     isPlaying = true
                 }
 
+                // Use position from loading callback - this is reliable
+                if notification.positionMs > 0 {
+                    let posMs = UInt32(notification.positionMs)
+                    positionAnchorMs = posMs
+                    positionAnchorTime = CACurrentMediaTime()
+                    currentPositionMs = posMs
+                }
+
                 // Resume playback after reconnect if we were playing before disconnect
                 // The transfer(None) loads the track at correct position but paused
                 // (because old Spirc set is_paused=true during shutdown)
@@ -684,13 +700,17 @@ final class PlaybackViewModel {
     private func handlePlaybackStateUpdate(_ state: PlaybackState?) {
         guard let state else { return }
 
-        debugLog("PlaybackViewModel", "Playback state update: playing=\(state.isPlaying), paused=\(state.isPaused), uri=\(state.trackUri)")
+        debugLog(
+            "PlaybackViewModel",
+            "Playback state update: playing=\(state.isPlaying), paused=\(state.isPaused), position=\(state.positionMs)ms, duration=\(state.durationMs)ms, uri=\(state.trackUri)",
+        )
 
         // Update playing state
-        // is_playing = true means actively playing audio
-        // is_paused = true means paused (not playing but has a track loaded)
+        // Use SpotifyPlayer.isPlaying directly from Rust layer - more reliable than cluster state
+        // The cluster may report paused=true during active playback in some states
         let wasPlaying = isPlaying
-        isPlaying = state.isPlaying && !state.isPaused
+        let newIsPlaying = SpotifyPlayer.isPlaying
+        isPlaying = newIsPlaying
 
         // Update track if changed
         if !state.trackUri.isEmpty, state.trackUri != currentTrackUri {
@@ -706,6 +726,7 @@ final class PlaybackViewModel {
         // Sync position anchor on state changes
         if state.positionMs >= 0 {
             let posMs = UInt32(state.positionMs)
+            debugLog("PlaybackViewModel", "Position anchor: \(positionAnchorMs) -> \(posMs)")
             positionAnchorMs = posMs
             positionAnchorTime = CACurrentMediaTime()
             currentPositionMs = posMs
@@ -734,6 +755,8 @@ final class PlaybackViewModel {
         let elapsed = CACurrentMediaTime() - positionAnchorTime
         let elapsedMs = UInt32(max(0, min(elapsed * 1000, Double(UInt32.max - 1))))
         let interpolated = positionAnchorMs.addingReportingOverflow(elapsedMs).partialValue
+        // Don't clamp to 0 if duration is unknown yet
+        guard trackDurationMs > 0 else { return interpolated }
         return min(interpolated, trackDurationMs)
     }
 
@@ -758,6 +781,12 @@ final class PlaybackViewModel {
     /// Sync position anchor with Rust - call after seek, play, resume, track change
     private func syncPositionAnchor() {
         let rustPosition = SpotifyPlayer.positionMs
+        // Don't overwrite valid position with 0 - Rust may not have position ready yet
+        if rustPosition == 0 && positionAnchorMs > 0 {
+            debugLog("PlaybackViewModel", "syncPositionAnchor: skipping - rustPosition=0 but have valid anchor=\(positionAnchorMs)")
+            return
+        }
+        debugLog("PlaybackViewModel", "syncPositionAnchor: rustPosition=\(rustPosition), was positionAnchorMs=\(positionAnchorMs)")
         positionAnchorMs = rustPosition
         positionAnchorTime = CACurrentMediaTime()
         lastRustPosition = rustPosition
