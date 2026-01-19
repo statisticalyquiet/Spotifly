@@ -611,9 +611,33 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                             IS_PLAYING.store(false, Ordering::SeqCst);
                             update_position(0);
                         }
-                        Some(PlayerEvent::TrackChanged { .. }) => {
-                            // Notify Swift that track changed - it should fetch updated queue
-                            debug!("TrackChanged event - triggering state update callback");
+                        Some(PlayerEvent::TrackChanged { audio_item }) => {
+                            // Extract track URI from audio_item (same as Loading event)
+                            let track_uri_str = audio_item.track_id.to_string();
+                            debug!("TrackChanged event: {} - triggering callbacks", track_uri_str);
+
+                            // Update current track URI
+                            {
+                                let mut uri_guard = CURRENT_TRACK_URI.lock().unwrap();
+                                *uri_guard = Some(track_uri_str.clone());
+                            }
+
+                            // Emit Loading callback with track info (position 0 for auto-advance)
+                            let cb_guard = LOADING_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                let notification = LoadingNotification {
+                                    track_uri: track_uri_str,
+                                    position_ms: 0,
+                                };
+                                if let Ok(json) = serde_json::to_string(&notification) {
+                                    let c_str = CString::new(json).unwrap();
+                                    cb(c_str.as_ptr());
+                                }
+                            }
+
+                            // Also trigger state update callback
                             let cb_guard = STATE_UPDATE_CALLBACK.lock().unwrap();
                             if let Some(callback) = *cb_guard {
                                 drop(cb_guard);
