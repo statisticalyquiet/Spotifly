@@ -35,6 +35,7 @@ struct PlaylistDetailView: View {
 
     // Drag-drop state
     @State private var draggedTrackId: String?
+    @State private var draggedFromIndex: Int?
 
     /// Initialize with a playlist ID (fetches playlist data)
     init(playlistId: String, playbackViewModel: PlaybackViewModel) {
@@ -306,6 +307,10 @@ struct PlaylistDetailView: View {
                 .opacity(draggedTrackId == track.id ? 0.5 : 1.0)
                 .onDrag {
                     draggedTrackId = track.id
+                    // Capture original index BEFORE any optimistic updates
+                    if let playlist = store.playlists[playlistId] {
+                        draggedFromIndex = playlist.trackIds.firstIndex(of: track.id)
+                    }
                     return NSItemProvider(object: track.id as NSString)
                 }
                 .onDrop(
@@ -314,6 +319,7 @@ struct PlaylistDetailView: View {
                         targetTrackId: track.id,
                         playlistId: playlistId,
                         draggedTrackId: $draggedTrackId,
+                        draggedFromIndex: $draggedFromIndex,
                         store: store,
                         playlistService: playlistService,
                         session: session,
@@ -441,41 +447,54 @@ struct PlaylistReorderDropDelegate: DropDelegate {
     let targetTrackId: String
     let playlistId: String
     @Binding var draggedTrackId: String?
+    @Binding var draggedFromIndex: Int?
     let store: AppStore
     let playlistService: PlaylistService
     let session: SpotifySession
 
     func performDrop(info _: DropInfo) -> Bool {
-        guard let draggedId = draggedTrackId else { return false }
+        guard draggedTrackId != nil else { return false }
 
-        // Get the current track order from store
-        guard let playlist = store.playlists[playlistId] else {
+        // Use the ORIGINAL index captured when drag started (before optimistic updates)
+        guard let originalFromIndex = draggedFromIndex else {
             draggedTrackId = nil
+            draggedFromIndex = nil
             return false
         }
 
-        let trackIds = playlist.trackIds
-
-        // Find the indices
-        guard let fromIndex = trackIds.firstIndex(of: draggedId),
-              let toIndex = trackIds.firstIndex(of: targetTrackId),
-              fromIndex != toIndex
-        else {
+        // Get current track order to find where the target track ended up
+        guard let playlist = store.playlists[playlistId] else {
             draggedTrackId = nil
+            draggedFromIndex = nil
+            return false
+        }
+
+        // Find the current index of the target track (this is the drop position)
+        guard let currentToIndex = playlist.trackIds.firstIndex(of: targetTrackId) else {
+            draggedTrackId = nil
+            draggedFromIndex = nil
             return true
         }
 
-        // Call the API to persist the reorder
+        // Don't make API call if dropped in same position
+        guard originalFromIndex != currentToIndex else {
+            draggedTrackId = nil
+            draggedFromIndex = nil
+            return true
+        }
+
+        // Call the API with the ORIGINAL from index
         Task {
             let token = await session.validAccessToken()
             do {
                 try await playlistService.reorderPlaylistTracks(
                     playlistId: playlistId,
-                    rangeStart: fromIndex,
-                    insertBefore: toIndex > fromIndex ? toIndex + 1 : toIndex,
+                    rangeStart: originalFromIndex,
+                    insertBefore: currentToIndex > originalFromIndex ? currentToIndex + 1 : currentToIndex,
                     accessToken: token,
                 )
             } catch {
+                debugLog("PlaylistReorder", "Failed to reorder: \(error)")
                 // Revert the optimistic update on failure by reloading
                 _ = try? await playlistService.getPlaylistTracks(
                     playlistId: playlistId,
@@ -485,6 +504,7 @@ struct PlaylistReorderDropDelegate: DropDelegate {
         }
 
         draggedTrackId = nil
+        draggedFromIndex = nil
         return true
     }
 
