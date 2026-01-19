@@ -223,7 +223,7 @@ final class PlaybackViewModel {
         isLoading = false
     }
 
-    func addToQueue(trackUri: String, accessToken: String) async {
+    func addToQueue(uri: String, accessToken: String) async {
         // Initialize if needed
         if !isInitialized {
             await initializeIfNeeded(accessToken: accessToken)
@@ -238,7 +238,7 @@ final class PlaybackViewModel {
 
         do {
             // Use Spirc to add to queue directly via librespot
-            try SpotifyPlayer.addToQueue(trackUri: trackUri)
+            try SpotifyPlayer.addToQueue(uri: uri)
             // Queue update will come via Mercury callback
         } catch {
             errorMessage = error.localizedDescription

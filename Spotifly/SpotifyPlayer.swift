@@ -912,10 +912,10 @@ enum SpotifyPlayer {
         }
     }
 
-    /// Adds a track to the queue via Spirc.
-    /// - Parameter trackUri: The Spotify track URI to add to the queue
-    static func addToQueue(trackUri: String) throws {
-        let result = trackUri.withCString { ptr in
+    /// Adds an item to the queue via Spirc.
+    /// - Parameter uri: The Spotify URI to add to the queue (track, episode, etc.)
+    static func addToQueue(uri: String) throws {
+        let result = uri.withCString { ptr in
             spotifly_add_to_queue(ptr)
         }
         guard result == 0 else {

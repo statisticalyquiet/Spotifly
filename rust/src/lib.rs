@@ -1983,20 +1983,20 @@ pub extern "C" fn spotifly_is_spirc_ready() -> i32 {
     }
 }
 
-/// Adds a track to the queue.
+/// Adds an item to the queue.
 /// Returns 0 on success, -1 on error.
 #[no_mangle]
-pub extern "C" fn spotifly_add_to_queue(track_uri: *const c_char) -> i32 {
-    if track_uri.is_null() {
-        debug!("Add to queue error: track_uri is null");
+pub extern "C" fn spotifly_add_to_queue(uri: *const c_char) -> i32 {
+    if uri.is_null() {
+        debug!("Add to queue error: uri is null");
         return -1;
     }
 
     let uri_str = unsafe {
-        match CStr::from_ptr(track_uri).to_str() {
+        match CStr::from_ptr(uri).to_str() {
             Ok(s) => s.to_string(),
             Err(_) => {
-                debug!("Add to queue error: invalid track_uri string");
+                debug!("Add to queue error: invalid uri string");
                 return -1;
             }
         }

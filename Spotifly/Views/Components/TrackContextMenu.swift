@@ -126,8 +126,8 @@ struct TrackContextMenu: View {
         Task {
             let token = await session.validAccessToken()
             await playbackViewModel.addToQueue(
-                trackUri: track.uri,
-                accessToken: token,
+                uri: track.uri,
+                accessToken: token
             )
         }
     }

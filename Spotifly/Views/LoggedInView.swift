@@ -273,7 +273,7 @@ struct LoggedInView: View {
                 Task {
                     let token = await session.validAccessToken()
                     for track in tracks {
-                        await playbackViewModel.addToQueue(trackUri: track.uri, accessToken: token)
+                        await playbackViewModel.addToQueue(uri: track.uri, accessToken: token)
                     }
                 }
             } label: {
@@ -367,7 +367,7 @@ struct LoggedInView: View {
                 Task {
                     let token = await session.validAccessToken()
                     for track in tracks {
-                        await playbackViewModel.addToQueue(trackUri: track.uri, accessToken: token)
+                        await playbackViewModel.addToQueue(uri: track.uri, accessToken: token)
                     }
                 }
             } label: {
