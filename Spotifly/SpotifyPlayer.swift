@@ -111,6 +111,14 @@ struct ContextLoadedNotification: Sendable {
     nonisolated let prevTrackProviders: [String]
 }
 
+/// Session client changed notification containing info about the controlling Spotify client
+struct SessionClientChangedNotification: Sendable {
+    nonisolated let clientId: String
+    nonisolated let clientName: String
+    nonisolated let clientBrandName: String
+    nonisolated let clientModelName: String
+}
+
 /// Connection state from librespot (nonisolated for C callback compatibility)
 struct LibrespotConnectionState: Sendable, Equatable, Encodable {
     nonisolated let sessionConnected: Bool
@@ -131,6 +139,9 @@ private nonisolated(unsafe) let connectionStateSubject = CurrentValueSubject<Lib
 
 /// Global subject for context loaded notifications (nonisolated for C callback access)
 private nonisolated(unsafe) let contextLoadedSubject = PassthroughSubject<ContextLoadedNotification, Never>()
+
+/// Global subject for session client changed notifications (nonisolated for C callback access)
+private nonisolated(unsafe) let sessionClientChangedSubject = PassthroughSubject<SessionClientChangedNotification, Never>()
 
 /// Registers the queue callback with Rust (must be called from nonisolated context)
 private nonisolated func registerQueueCallback() {
@@ -358,6 +369,51 @@ private nonisolated func handleSessionConnectedCallback() {
     sessionConnectedSubject.send()
 }
 
+/// Registers the session client changed callback with Rust
+private nonisolated func registerSessionClientChangedCallback() {
+    spotifly_register_session_client_changed_callback { jsonPtr in
+        handleSessionClientChangedCallback(jsonPtr)
+    }
+}
+
+/// C callback for session client changed notifications from Rust
+/// Fires when the controlling Spotify client changes
+private nonisolated func handleSessionClientChangedCallback(_ jsonPtr: UnsafePointer<CChar>?) {
+    guard let jsonPtr else {
+        debugLog("SpotifyPlayer", "handleSessionClientChangedCallback: jsonPtr is nil")
+        return
+    }
+
+    let jsonString = String(cString: jsonPtr)
+    debugLog("SpotifyPlayer", "Session client changed: \(jsonString)")
+
+    guard let data = jsonString.data(using: .utf8) else {
+        return
+    }
+
+    do {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        let notification = SessionClientChangedNotification(
+            clientId: json["client_id"] as? String ?? "",
+            clientName: json["client_name"] as? String ?? "",
+            clientBrandName: json["client_brand_name"] as? String ?? "",
+            clientModelName: json["client_model_name"] as? String ?? "",
+        )
+
+        debugLog(
+            "SpotifyPlayer",
+            "Session client: \(notification.clientName) (\(notification.clientBrandName) \(notification.clientModelName))",
+        )
+
+        sessionClientChangedSubject.send(notification)
+    } catch {
+        debugLog("SpotifyPlayer", "Failed to parse session client changed JSON: \(error)")
+    }
+}
+
 /// C callback for state update notifications from Rust
 private nonisolated func handleStateUpdateCallback() {
     debugLog("SpotifyPlayer", "State update callback triggered")
@@ -540,6 +596,7 @@ enum SpotifyPlayer {
         registerQueueChangedCallback()
         registerSessionDisconnectedCallback()
         registerSessionConnectedCallback()
+        registerSessionClientChangedCallback()
         registerConnectionStateCallback()
         registerContextLoadedCallback()
 
@@ -609,6 +666,12 @@ enum SpotifyPlayer {
     /// Subscribe to this to enable playback controls after initialization or reconnection.
     static var sessionConnected: AnyPublisher<Void, Never> {
         sessionConnectedSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher for session client changed notifications.
+    /// Fires when the controlling Spotify client changes (e.g., which app initiated playback).
+    static var sessionClientChanged: AnyPublisher<SessionClientChangedNotification, Never> {
+        sessionClientChangedSubject.eraseToAnyPublisher()
     }
 
     /// Returns whether the session is currently connected and ready for playback commands.

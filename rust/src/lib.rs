@@ -55,6 +55,8 @@ static SESSION_DISCONNECTED_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
     Lazy::new(|| Mutex::new(None));
 static SESSION_CONNECTED_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
     Lazy::new(|| Mutex::new(None));
+static SESSION_CLIENT_CHANGED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
+    Lazy::new(|| Mutex::new(None));
 static CONTEXT_LOADED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
@@ -166,6 +168,14 @@ struct ContextLoadedInfo {
     next_track_providers: Vec<String>,
     prev_track_uris: Vec<String>,
     prev_track_providers: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SessionClientInfo {
+    client_id: String,
+    client_name: String,
+    client_brand_name: String,
+    client_model_name: String,
 }
 
 /// Get current timestamp in milliseconds since UNIX epoch
@@ -305,7 +315,16 @@ pub extern "C" fn spotifly_register_session_connected_callback(callback: extern 
     *cb = Some(callback);
 }
 
-/// Registers a callback to receive context resolved notifications.
+/// Registers a callback to receive session client changed notifications.
+#[unsafe(no_mangle)]
+pub extern "C" fn spotifly_register_session_client_changed_callback(
+    callback: extern "C" fn(*const c_char),
+) {
+    let mut cb = SESSION_CLIENT_CHANGED_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Registers a callback to receive context loaded notifications.
 /// Called when a context (playlist, album, etc.) is resolved with the list of track URIs.
 /// The callback receives JSON with context_uri, current track, next tracks, and previous tracks.
 /// This fires immediately when context is resolved locally (before Spotify servers acknowledge).
@@ -737,6 +756,32 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 let cb = callback;
                                 drop(cb_guard);
                                 cb();
+                            }
+                        }
+                        Some(PlayerEvent::SessionClientChanged {
+                            client_id,
+                            client_name,
+                            client_brand_name,
+                            client_model_name,
+                        }) => {
+                            debug!(
+                                "SessionClientChanged event: id={}, name={}, brand={}, model={}",
+                                client_id, client_name, client_brand_name, client_model_name
+                            );
+                            let cb_guard = SESSION_CLIENT_CHANGED_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                let info = SessionClientInfo {
+                                    client_id,
+                                    client_name,
+                                    client_brand_name,
+                                    client_model_name,
+                                };
+                                if let Ok(json) = serde_json::to_string(&info) {
+                                    let c_str = CString::new(json).unwrap();
+                                    cb(c_str.as_ptr());
+                                }
                             }
                         }
                         None => break,

@@ -149,6 +149,14 @@ typedef void (*SessionConnectedCallback)(void);
 /// Called when the Spotify session is connected and ready for playback commands.
 void spotifly_register_session_connected_callback(SessionConnectedCallback callback);
 
+/// Callback function type for session client changed notifications.
+/// Receives a JSON string containing client_id, client_name, client_brand_name, client_model_name.
+typedef void (*SessionClientChangedCallback)(const char* client_json);
+
+/// Registers a callback to receive session client changed notifications.
+/// Called when the controlling Spotify client changes (e.g., which app initiated playback).
+void spotifly_register_session_client_changed_callback(SessionClientChangedCallback callback);
+
 /// Returns 1 if session is connected and ready for commands, 0 otherwise.
 /// Use this to check if playback commands will be accepted.
 int32_t spotifly_is_session_connected(void);
