@@ -209,11 +209,23 @@ struct OwnDeviceInfo: Sendable, Encodable {
 
 // MARK: - Queue Models
 
-/// Indicates the source of a track in the queue
+/// Indicates the source of a track in the queue (matches librespot provider values)
 enum TrackProvider: String, Codable, Sendable {
     case queue // Manually added to queue
     case context // From current album/playlist/artist
     case autoplay // Autoplay suggestion
+    case unavailable // Track is unavailable
+
+    /// Parse from librespot provider string
+    init(from providerString: String) {
+        switch providerString {
+        case "queue": self = .queue
+        case "context": self = .context
+        case "autoplay": self = .autoplay
+        case "unavailable": self = .unavailable
+        default: self = .context // Default to context for unknown values
+        }
+    }
 }
 
 /// A track in the queue with provider information

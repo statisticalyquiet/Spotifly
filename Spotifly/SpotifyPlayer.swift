@@ -21,6 +21,8 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
     nonisolated let albumId: String?
     nonisolated let artistId: String?
     nonisolated let externalUrl: String?
+    /// Track provider: "context", "queue", "autoplay", or "unavailable"
+    nonisolated let provider: String
 
     nonisolated var durationFormatted: String {
         formatTrackTime(milliseconds: Int(durationMs))
@@ -40,6 +42,7 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
         albumId: String?,
         artistId: String?,
         externalUrl: String?,
+        provider: String,
     ) {
         self.id = id
         self.uri = uri
@@ -50,10 +53,11 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
         self.albumId = albumId
         self.artistId = artistId
         self.externalUrl = externalUrl
+        self.provider = provider
     }
 
-    /// Create from Spotify API APITrack
-    @MainActor init(from track: APITrack) {
+    /// Create from Spotify API APITrack (Web API doesn't provide provider, defaults to "context")
+    @MainActor init(from track: APITrack, provider: String = "context") {
         id = track.uri
         uri = track.uri
         name = track.name
@@ -63,6 +67,7 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
         albumId = track.albumId
         artistId = track.artistId
         externalUrl = track.externalUrl ?? spotifyExternalUrl(type: .track, id: track.id)
+        self.provider = provider
     }
 }
 
@@ -352,6 +357,7 @@ private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
                 albumId: track.album?.id,
                 artistId: track.artists?.first?.id,
                 externalUrl: track.externalUrls?.spotify,
+                provider: "context", // Web API doesn't provide provider info
             )
         }
 
@@ -366,6 +372,7 @@ private func fetchAndEmitQueueState(retryOnEmpty: Bool = true) async {
                 albumId: track.album?.id,
                 artistId: track.artists?.first?.id,
                 externalUrl: track.externalUrls?.spotify,
+                provider: "queue", // Items in queue array are manually queued
             )
         }
 
@@ -466,6 +473,7 @@ private nonisolated func parseQueueItem(from dict: [String: Any]) -> QueueItem? 
         albumId: nil,
         artistId: nil,
         externalUrl: nil,
+        provider: dict["provider"] as? String ?? "context",
     )
 }
 

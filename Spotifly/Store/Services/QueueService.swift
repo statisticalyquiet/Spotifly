@@ -40,30 +40,31 @@ final class QueueService {
     /// Handle queue update from Spirc callback or Web API
     private func handleQueueUpdate(_ queueState: QueueState?) {
         guard let state = queueState else {
-            store.setQueue(previousIds: [], currentId: nil, nextIds: [])
+            store.setQueue(previous: [], current: nil, next: [])
             return
         }
 
-        // Extract URIs and convert to track IDs
-        let currentId: String? = if let uri = state.currentTrack?.uri {
-            SpotifyAPI.parseTrackURI(uri)
-        } else {
-            nil
+        // Convert QueueItem to QueueEntry (extract track ID and provider)
+        func toQueueEntry(_ item: QueueItem) -> QueueEntry? {
+            guard let trackId = SpotifyAPI.parseTrackURI(item.uri) else { return nil }
+            return QueueEntry(trackId: trackId, provider: TrackProvider(from: item.provider))
         }
-        let nextIds = state.nextTracks.compactMap { SpotifyAPI.parseTrackURI($0.uri) }
+
+        let currentEntry: QueueEntry? = state.currentTrack.flatMap { toQueueEntry($0) }
+        let nextEntries = state.nextTracks.compactMap { toQueueEntry($0) }
         // previousTracks is nil when from Web API (which doesn't provide history)
-        let previousIds = state.previousTracks?.compactMap { SpotifyAPI.parseTrackURI($0.uri) }
+        let previousEntries = state.previousTracks?.compactMap { toQueueEntry($0) }
 
-        if let prevCount = previousIds?.count {
-            debugLog("QueueService", "Queue updated from Mercury: prev=\(prevCount), current=\(currentId != nil ? 1 : 0), next=\(nextIds.count)")
+        if let prevCount = previousEntries?.count {
+            debugLog("QueueService", "Queue updated from Mercury: prev=\(prevCount), current=\(currentEntry != nil ? 1 : 0), next=\(nextEntries.count)")
         } else {
-            debugLog("QueueService", "Queue updated from Web API: current=\(currentId != nil ? 1 : 0), next=\(nextIds.count) (preserving previous)")
+            debugLog("QueueService", "Queue updated from Web API: current=\(currentEntry != nil ? 1 : 0), next=\(nextEntries.count) (preserving previous)")
         }
 
-        store.setQueue(previousIds: previousIds, currentId: currentId, nextIds: nextIds)
+        store.setQueue(previous: previousEntries, current: currentEntry, next: nextEntries)
 
         // Fetch track metadata for IDs not already in store
-        let allIds = (previousIds ?? []) + (currentId.map { [$0] } ?? []) + nextIds
+        let allIds = (previousEntries ?? []).map(\.trackId) + (currentEntry.map { [$0.trackId] } ?? []) + nextEntries.map(\.trackId)
         fetchTrackMetadata(for: allIds)
     }
 
@@ -172,12 +173,12 @@ final class QueueService {
 
     /// Update Now Playing info from current track in AppStore
     private func updateNowPlayingMetadata() {
-        // Trigger Now Playing update - it reads from store.currentTrack
+        // Trigger Now Playing update - it reads from store.currentTrackEntity
         PlaybackViewModel.shared.updateNowPlayingInfo()
 
-        let prevCount = store.previousTracks.count
-        let nextCount = store.nextTracks.count
-        let total = prevCount + (store.currentTrack != nil ? 1 : 0) + nextCount
+        let prevCount = store.previousTrackEntities.count
+        let nextCount = store.nextTrackEntities.count
+        let total = prevCount + (store.currentTrackEntity != nil ? 1 : 0) + nextCount
         debugLog("QueueService", "Queue tracks resolved: \(total) with metadata (prev=\(prevCount), next=\(nextCount))")
     }
 
@@ -186,11 +187,11 @@ final class QueueService {
     /// Batch check favorite status for all queue tracks and store in AppStore
     func loadFavorites(accessToken: String) async {
         // Collect all queue track IDs
-        var allIds = store.queue.previousTrackIds
-        if let currentId = store.queue.currentTrackId {
+        var allIds = store.queue.previousTracks.map(\.trackId)
+        if let currentId = store.queue.currentTrack?.trackId {
             allIds.append(currentId)
         }
-        allIds.append(contentsOf: store.queue.nextTrackIds)
+        allIds.append(contentsOf: store.queue.nextTracks.map(\.trackId))
 
         // Deduplicate IDs (queue can have duplicates)
         var seenIds = Set<String>()

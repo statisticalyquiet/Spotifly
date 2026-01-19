@@ -11,14 +11,20 @@ import SwiftUI
 
 // MARK: - Queue State
 
-/// Normalized queue state storing track IDs (not URIs)
+/// A track reference in the queue with its provider (normalized - stores ID only, not full metadata)
+struct QueueEntry: Equatable {
+    let trackId: String
+    let provider: TrackProvider
+}
+
+/// Normalized queue state storing track entries (ID + provider)
 struct Queue {
-    /// Previously played track IDs (from Mercury only - Web API doesn't provide this)
-    var previousTrackIds: [String] = []
-    /// Current track ID
-    var currentTrackId: String?
-    /// Next track IDs in queue
-    var nextTrackIds: [String] = []
+    /// Previously played tracks (from Mercury only - Web API doesn't provide this)
+    var previousTracks: [QueueEntry] = []
+    /// Current track
+    var currentTrack: QueueEntry?
+    /// Next tracks in queue
+    var nextTracks: [QueueEntry] = []
     /// Whether queue is currently being fetched/updated
     var isLoading = false
     /// Error message if queue fetch failed
@@ -182,30 +188,30 @@ final class AppStore {
 
     // MARK: - Queue Computed Properties
 
-    /// Current track from the tracks store
-    var currentTrack: Track? {
-        guard let id = queue.currentTrackId else { return nil }
-        return tracks[id]
+    /// Current track entity from the tracks store
+    var currentTrackEntity: Track? {
+        guard let trackId = queue.currentTrack?.trackId else { return nil }
+        return tracks[trackId]
     }
 
-    /// Previously played tracks from the tracks store
-    var previousTracks: [Track] {
-        queue.previousTrackIds.compactMap { tracks[$0] }
+    /// Previously played track entities from the tracks store
+    var previousTrackEntities: [Track] {
+        queue.previousTracks.compactMap { tracks[$0.trackId] }
     }
 
-    /// Next tracks from the tracks store
-    var nextTracks: [Track] {
-        queue.nextTrackIds.compactMap { tracks[$0] }
+    /// Next track entities from the tracks store
+    var nextTrackEntities: [Track] {
+        queue.nextTracks.compactMap { tracks[$0.trackId] }
     }
 
     /// Total queue length
     var queueLength: Int {
-        queue.previousTrackIds.count + (queue.currentTrackId != nil ? 1 : 0) + queue.nextTrackIds.count
+        queue.previousTracks.count + (queue.currentTrack != nil ? 1 : 0) + queue.nextTracks.count
     }
 
     /// Current track index within the full queue
     var currentIndex: Int {
-        queue.previousTrackIds.count
+        queue.previousTracks.count
     }
 
     /// Active device (if any)
@@ -483,13 +489,13 @@ final class AppStore {
 
     // MARK: - Queue Actions
 
-    /// Set queue state with track IDs. If `previous` is nil, preserves existing (Web API doesn't provide history).
-    func setQueue(previousIds: [String]?, currentId: String?, nextIds: [String]) {
-        if let previousIds {
-            queue.previousTrackIds = previousIds
+    /// Set queue state with queue entries. If `previous` is nil, preserves existing (Web API doesn't provide history).
+    func setQueue(previous: [QueueEntry]?, current: QueueEntry?, next: [QueueEntry]) {
+        if let previous {
+            queue.previousTracks = previous
         }
-        queue.currentTrackId = currentId
-        queue.nextTrackIds = nextIds
+        queue.currentTrack = current
+        queue.nextTracks = next
     }
 
     /// Set queue loading state
@@ -544,10 +550,15 @@ final class AppStore {
 
                 let activeDeviceId: String?
 
+                struct QueueItemSnapshot: Encodable {
+                    let trackId: String
+                    let provider: String
+                }
+
                 struct QueueSnapshot: Encodable {
-                    let previousTrackIds: [String]
-                    let currentTrackId: String?
-                    let nextTrackIds: [String]
+                    let previousTracks: [QueueItemSnapshot]
+                    let currentTrack: QueueItemSnapshot?
+                    let nextTracks: [QueueItemSnapshot]
                     let isLoading: Bool
                     let errorMessage: String?
                 }
@@ -577,9 +588,9 @@ final class AppStore {
                 topArtistIds: topArtistIds,
                 newReleaseAlbumIds: newReleaseAlbumIds,
                 queue: StoreSnapshot.QueueSnapshot(
-                    previousTrackIds: queue.previousTrackIds,
-                    currentTrackId: queue.currentTrackId,
-                    nextTrackIds: queue.nextTrackIds,
+                    previousTracks: queue.previousTracks.map { StoreSnapshot.QueueItemSnapshot(trackId: $0.trackId, provider: $0.provider.rawValue) },
+                    currentTrack: queue.currentTrack.map { StoreSnapshot.QueueItemSnapshot(trackId: $0.trackId, provider: $0.provider.rawValue) },
+                    nextTracks: queue.nextTracks.map { StoreSnapshot.QueueItemSnapshot(trackId: $0.trackId, provider: $0.provider.rawValue) },
                     isLoading: queue.isLoading,
                     errorMessage: queue.errorMessage,
                 ),

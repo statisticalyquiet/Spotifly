@@ -28,11 +28,11 @@ struct QueueListView: View {
 
     /// Flattened queue: previous + current + next
     private var allTracks: [Track] {
-        var tracks = store.previousTracks
-        if let current = store.currentTrack {
+        var tracks = store.previousTrackEntities
+        if let current = store.currentTrackEntity {
             tracks.append(current)
         }
-        tracks.append(contentsOf: store.nextTracks)
+        tracks.append(contentsOf: store.nextTrackEntities)
         return tracks
     }
 
@@ -48,7 +48,7 @@ struct QueueListView: View {
 
     /// Unplayed song count for header (next tracks only)
     private var unplayedSongCount: Int {
-        store.nextTracks.count
+        store.nextTrackEntities.count
     }
 
     var body: some View {
@@ -72,7 +72,7 @@ struct QueueListView: View {
             let token = await session.validAccessToken()
             await queueService.loadFavorites(accessToken: token)
         }
-        .onChange(of: store.queue.currentTrackId) { _, _ in
+        .onChange(of: store.queue.currentTrack?.trackId) { _, _ in
             // When queue updates, refresh favorites for new items
             Task {
                 let token = await session.validAccessToken()

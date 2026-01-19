@@ -436,7 +436,7 @@ final class PlaybackViewModel {
         guard trackDurationMs > 0 else { return }
 
         // Read current track metadata from AppStore
-        let currentTrack = store?.currentTrack
+        let currentTrack = store?.currentTrackEntity
 
         var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
 

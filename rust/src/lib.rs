@@ -109,6 +109,8 @@ struct QueueItem {
     image_url: String,
     duration_ms: u32,
     album_name: String,
+    /// Track provider: "context", "queue", "autoplay", or "unavailable"
+    provider: String,
 }
 
 #[derive(Serialize)]
@@ -996,6 +998,7 @@ fn process_and_send_queue(player_state: PlayerState) {
                 image_url: String::new(),
                 duration_ms: 0,
                 album_name: String::new(),
+                provider: t.provider.clone(),
             }
         };
 
