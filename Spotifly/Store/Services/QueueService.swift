@@ -170,16 +170,10 @@ final class QueueService {
         _ = await metadataFetchTask?.value
     }
 
-    /// Update PlaybackViewModel with current track metadata for Now Playing info
+    /// Update Now Playing info from current track in AppStore
     private func updateNowPlayingMetadata() {
-        // Use computed property to get current track from store
-        if let track = store.currentTrack {
-            PlaybackViewModel.shared.setCurrentTrackMetadata(
-                name: track.name,
-                artist: track.artistName,
-                artURL: track.imageURL?.absoluteString,
-            )
-        }
+        // Trigger Now Playing update - it reads from store.currentTrack
+        PlaybackViewModel.shared.updateNowPlayingInfo()
 
         let prevCount = store.previousTracks.count
         let nextCount = store.nextTracks.count

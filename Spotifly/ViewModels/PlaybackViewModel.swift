@@ -50,6 +50,9 @@ final class PlaybackViewModel {
     /// Shared singleton instance - ensures only one timer runs
     static let shared = PlaybackViewModel()
 
+    /// Reference to AppStore for reading current track metadata (set by LoggedInView)
+    private weak var store: AppStore?
+
     var isPlaying = false
     var isLoading = false
     var currentTrackUri: String?
@@ -63,11 +66,6 @@ final class PlaybackViewModel {
     // Playback state from Mercury (duration/position for progress bar)
     var trackDurationMs: UInt32 = 0
     var currentPositionMs: UInt32 = 0
-
-    // Current track metadata for Now Playing info (set by QueueService)
-    private(set) var currentTrackName: String?
-    private(set) var currentArtistName: String?
-    private(set) var currentAlbumArtURL: String?
 
     // Volume (0.0 - 1.0)
     var volume: Double = 0.5 {
@@ -285,13 +283,9 @@ final class PlaybackViewModel {
         isPlaying = SpotifyPlayer.isPlaying
     }
 
-    /// Updates current track metadata for Now Playing info center.
-    /// Called by QueueService when the current track changes.
-    func setCurrentTrackMetadata(name: String?, artist: String?, artURL: String?) {
-        currentTrackName = name
-        currentArtistName = artist
-        currentAlbumArtURL = artURL
-        updateNowPlayingInfo()
+    /// Sets the AppStore reference. Call this after AppStore is created.
+    func setStore(_ store: AppStore) {
+        self.store = store
     }
 
     // MARK: - Playback Control (via Spirc)
@@ -441,13 +435,16 @@ final class PlaybackViewModel {
         // Don't update Now Playing with invalid data - causes --:-- display
         guard trackDurationMs > 0 else { return }
 
+        // Read current track metadata from AppStore
+        let currentTrack = store?.currentTrack
+
         var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
 
-        if let trackName = currentTrackName {
+        if let trackName = currentTrack?.name {
             nowPlayingInfo[MPMediaItemPropertyTitle] = trackName
         }
 
-        if let artistName = currentArtistName {
+        if let artistName = currentTrack?.artistName {
             nowPlayingInfo[MPMediaItemPropertyArtist] = artistName
         }
 
@@ -467,7 +464,8 @@ final class PlaybackViewModel {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
 
         // Album art - only download if URL changed
-        if let artURL = currentAlbumArtURL, artURL != lastAlbumArtURL, !artURL.isEmpty, let url = URL(string: artURL) {
+        let artURLString = currentTrack?.imageURL?.absoluteString
+        if let artURL = artURLString, artURL != lastAlbumArtURL, !artURL.isEmpty, let url = URL(string: artURL) {
             lastAlbumArtURL = artURL
 
             // Download album art asynchronously

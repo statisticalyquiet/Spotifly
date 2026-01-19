@@ -56,6 +56,9 @@ struct LoggedInView: View {
             await session.validAccessToken()
         }))
         _connectionService = State(initialValue: ConnectionService(store: store))
+
+        // Give PlaybackViewModel access to AppStore for reading current track metadata
+        playbackViewModel.setStore(store)
     }
 
     @State private var selectedNavigationItem: NavigationItem? = .startpage
