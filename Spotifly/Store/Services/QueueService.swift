@@ -40,42 +40,41 @@ final class QueueService {
     /// Handle queue update from Spirc callback or Web API
     private func handleQueueUpdate(_ queueState: QueueState?) {
         guard let state = queueState else {
-            store.setQueue(previous: [], current: nil, next: [])
+            store.setQueue(previousIds: [], currentId: nil, nextIds: [])
             return
         }
 
-        // Extract URIs from queue state
-        let currentURI = state.currentTrack?.uri
-        let nextURIs = state.nextTracks.map(\.uri)
-        // previousTracks is nil when from Web API (which doesn't provide history)
-        let previousURIs = state.previousTracks?.map(\.uri)
-
-        if let prevCount = previousURIs?.count {
-            debugLog("QueueService", "Queue updated from Mercury: prev=\(prevCount), current=\(currentURI != nil ? 1 : 0), next=\(nextURIs.count)")
+        // Extract URIs and convert to track IDs
+        let currentId: String? = if let uri = state.currentTrack?.uri {
+            SpotifyAPI.parseTrackURI(uri)
         } else {
-            debugLog("QueueService", "Queue updated from Web API: current=\(currentURI != nil ? 1 : 0), next=\(nextURIs.count) (preserving previous)")
+            nil
+        }
+        let nextIds = state.nextTracks.compactMap { SpotifyAPI.parseTrackURI($0.uri) }
+        // previousTracks is nil when from Web API (which doesn't provide history)
+        let previousIds = state.previousTracks?.compactMap { SpotifyAPI.parseTrackURI($0.uri) }
+
+        if let prevCount = previousIds?.count {
+            debugLog("QueueService", "Queue updated from Mercury: prev=\(prevCount), current=\(currentId != nil ? 1 : 0), next=\(nextIds.count)")
+        } else {
+            debugLog("QueueService", "Queue updated from Web API: current=\(currentId != nil ? 1 : 0), next=\(nextIds.count) (preserving previous)")
         }
 
-        store.setQueue(previous: previousURIs, current: currentURI, next: nextURIs)
+        store.setQueue(previousIds: previousIds, currentId: currentId, nextIds: nextIds)
 
-        // Fetch track metadata (uses store cache)
-        let allURIs = (previousURIs ?? []) + (currentURI.map { [$0] } ?? []) + nextURIs
-        fetchTrackMetadata(for: allURIs)
+        // Fetch track metadata for IDs not already in store
+        let allIds = (previousIds ?? []) + (currentId.map { [$0] } ?? []) + nextIds
+        fetchTrackMetadata(for: allIds)
     }
 
     // MARK: - Metadata Fetching
 
     /// Fetch track metadata from Web API for tracks not already in the store
     /// Uses debouncing to avoid cancelling requests during rapid queue updates
-    private func fetchTrackMetadata(for uris: [String]) {
-        // Extract unique track IDs from URIs (queue can have duplicates)
+    private func fetchTrackMetadata(for trackIds: [String]) {
+        // Deduplicate IDs (queue can have duplicates)
         var seenIds = Set<String>()
-        let uniqueTrackIds = uris.compactMap { uri -> String? in
-            guard let trackId = SpotifyAPI.parseTrackURI(uri),
-                  seenIds.insert(trackId).inserted
-            else { return nil }
-            return trackId
-        }
+        let uniqueTrackIds = trackIds.filter { seenIds.insert($0).inserted }
 
         guard !uniqueTrackIds.isEmpty else { return }
 
@@ -192,21 +191,16 @@ final class QueueService {
 
     /// Batch check favorite status for all queue tracks and store in AppStore
     func loadFavorites(accessToken: String) async {
-        // Collect all queue URIs
-        var allURIs = store.previousTrackURIs
-        if let current = store.currentTrackURI {
-            allURIs.append(current)
+        // Collect all queue track IDs
+        var allIds = store.queue.previousTrackIds
+        if let currentId = store.queue.currentTrackId {
+            allIds.append(currentId)
         }
-        allURIs.append(contentsOf: store.nextTrackURIs)
+        allIds.append(contentsOf: store.queue.nextTrackIds)
 
-        // Extract unique track IDs from URIs (queue can have duplicates)
+        // Deduplicate IDs (queue can have duplicates)
         var seenIds = Set<String>()
-        let trackIds = allURIs.compactMap { uri -> String? in
-            guard let trackId = SpotifyAPI.parseTrackURI(uri),
-                  seenIds.insert(trackId).inserted
-            else { return nil }
-            return trackId
-        }
+        let trackIds = allIds.filter { seenIds.insert($0).inserted }
 
         guard !trackIds.isEmpty else { return }
 

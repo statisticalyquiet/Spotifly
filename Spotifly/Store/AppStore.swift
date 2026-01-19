@@ -9,6 +9,22 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Queue State
+
+/// Normalized queue state storing track IDs (not URIs)
+struct Queue {
+    /// Previously played track IDs (from Mercury only - Web API doesn't provide this)
+    var previousTrackIds: [String] = []
+    /// Current track ID
+    var currentTrackId: String?
+    /// Next track IDs in queue
+    var nextTrackIds: [String] = []
+    /// Whether queue is currently being fetched/updated
+    var isLoading = false
+    /// Error message if queue fetch failed
+    var errorMessage: String?
+}
+
 // MARK: - App Store
 
 @MainActor
@@ -89,15 +105,10 @@ final class AppStore {
     var newReleasesErrorMessage: String?
     var hasLoadedNewReleases = false
 
-    // MARK: - Queue State (matches Spotify's prev/current/next structure)
+    // MARK: - Queue State
 
-    /// Current track URI (from Mercury or Web API)
-    private(set) var currentTrackURI: String?
-    /// Previously played track URIs (from Mercury only - Web API doesn't provide this)
-    private(set) var previousTrackURIs: [String] = []
-    /// Next track URIs (from Mercury or Web API)
-    private(set) var nextTrackURIs: [String] = []
-    var queueErrorMessage: String?
+    /// Queue state (previous/current/next track IDs + loading state)
+    var queue = Queue()
 
     // MARK: - Device Loading State
 
@@ -173,35 +184,28 @@ final class AppStore {
 
     /// Current track from the tracks store
     var currentTrack: Track? {
-        guard let uri = currentTrackURI,
-              let id = SpotifyAPI.parseTrackURI(uri) else { return nil }
+        guard let id = queue.currentTrackId else { return nil }
         return tracks[id]
     }
 
     /// Previously played tracks from the tracks store
     var previousTracks: [Track] {
-        previousTrackURIs.compactMap { uri in
-            guard let id = SpotifyAPI.parseTrackURI(uri) else { return nil }
-            return tracks[id]
-        }
+        queue.previousTrackIds.compactMap { tracks[$0] }
     }
 
     /// Next tracks from the tracks store
     var nextTracks: [Track] {
-        nextTrackURIs.compactMap { uri in
-            guard let id = SpotifyAPI.parseTrackURI(uri) else { return nil }
-            return tracks[id]
-        }
+        queue.nextTrackIds.compactMap { tracks[$0] }
     }
 
     /// Total queue length
     var queueLength: Int {
-        previousTrackURIs.count + (currentTrackURI != nil ? 1 : 0) + nextTrackURIs.count
+        queue.previousTrackIds.count + (queue.currentTrackId != nil ? 1 : 0) + queue.nextTrackIds.count
     }
 
     /// Current track index within the full queue
     var currentIndex: Int {
-        previousTrackURIs.count
+        queue.previousTrackIds.count
     }
 
     /// Active device (if any)
@@ -479,13 +483,23 @@ final class AppStore {
 
     // MARK: - Queue Actions
 
-    /// Set queue state. If `previous` is nil, preserves existing previousTrackURIs (Web API case).
-    func setQueue(previous: [String]?, current: String?, next: [String]) {
-        if let previous {
-            previousTrackURIs = previous
+    /// Set queue state with track IDs. If `previous` is nil, preserves existing (Web API doesn't provide history).
+    func setQueue(previousIds: [String]?, currentId: String?, nextIds: [String]) {
+        if let previousIds {
+            queue.previousTrackIds = previousIds
         }
-        currentTrackURI = current
-        nextTrackURIs = next
+        queue.currentTrackId = currentId
+        queue.nextTrackIds = nextIds
+    }
+
+    /// Set queue loading state
+    func setQueueLoading(_ isLoading: Bool) {
+        queue.isLoading = isLoading
+    }
+
+    /// Set queue error message
+    func setQueueError(_ message: String?) {
+        queue.errorMessage = message
     }
 
     // MARK: - Connection State Actions
@@ -526,11 +540,17 @@ final class AppStore {
                 let topArtistIds: [String]
                 let newReleaseAlbumIds: [String]
 
-                let currentTrackURI: String?
-                let previousTrackURIs: [String]
-                let nextTrackURIs: [String]
+                let queue: QueueSnapshot
 
                 let activeDeviceId: String?
+
+                struct QueueSnapshot: Encodable {
+                    let previousTrackIds: [String]
+                    let currentTrackId: String?
+                    let nextTrackIds: [String]
+                    let isLoading: Bool
+                    let errorMessage: String?
+                }
 
                 let connectionState: LibrespotConnectionState?
                 let ownDevice: OwnDeviceInfo?
@@ -556,9 +576,13 @@ final class AppStore {
                 recentItemURIs: recentItemURIs,
                 topArtistIds: topArtistIds,
                 newReleaseAlbumIds: newReleaseAlbumIds,
-                currentTrackURI: currentTrackURI,
-                previousTrackURIs: previousTrackURIs,
-                nextTrackURIs: nextTrackURIs,
+                queue: StoreSnapshot.QueueSnapshot(
+                    previousTrackIds: queue.previousTrackIds,
+                    currentTrackId: queue.currentTrackId,
+                    nextTrackIds: queue.nextTrackIds,
+                    isLoading: queue.isLoading,
+                    errorMessage: queue.errorMessage,
+                ),
                 activeDeviceId: activeDeviceId,
                 connectionState: connectionState,
                 ownDevice: ownDevice,

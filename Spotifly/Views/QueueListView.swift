@@ -59,7 +59,7 @@ struct QueueListView: View {
             Divider()
 
             // Scrollable content
-            if let error = store.queueErrorMessage {
+            if let error = store.queue.errorMessage {
                 errorView(error)
             } else if allTracks.isEmpty {
                 emptyView
@@ -72,7 +72,7 @@ struct QueueListView: View {
             let token = await session.validAccessToken()
             await queueService.loadFavorites(accessToken: token)
         }
-        .onChange(of: store.currentTrackURI) { _, _ in
+        .onChange(of: store.queue.currentTrackId) { _, _ in
             // When queue updates, refresh favorites for new items
             Task {
                 let token = await session.validAccessToken()
