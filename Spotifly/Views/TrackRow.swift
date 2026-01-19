@@ -19,6 +19,7 @@ struct TrackRow: View {
     let index: Int? // Optional index for queue
     let isCurrentTrack: Bool
     let isPlayedTrack: Bool // For queue - tracks that have already played
+    let provider: TrackProvider? // Optional provider (queue, context, autoplay, unavailable)
     @Bindable var playbackViewModel: PlaybackViewModel
     let doubleTapBehavior: TrackRowDoubleTapBehavior
     let currentSection: NavigationItem // Current sidebar section (for "Go to" navigation)
@@ -41,12 +42,28 @@ struct TrackRow: View {
         store.isFavorite(track.id)
     }
 
+    /// Provider symbol for display (Q=queue, C=context, A=autoplay, nil for unavailable)
+    private var providerSymbol: String? {
+        switch provider {
+        case .queue: "Q"
+        case .context: "C"
+        case .autoplay: "A"
+        case .unavailable, .none: nil
+        }
+    }
+
+    /// Whether the row should be disabled (unavailable tracks)
+    private var isUnavailable: Bool {
+        provider == .unavailable
+    }
+
     init(
         track: Track,
         showTrackNumber: Bool = false,
         index: Int? = nil,
         currentlyPlayingURI: String?,
         currentIndex: Int? = nil,
+        provider: TrackProvider? = nil,
         playbackViewModel: PlaybackViewModel,
         doubleTapBehavior: TrackRowDoubleTapBehavior = .playTrack,
         currentSection: NavigationItem = .startpage,
@@ -61,6 +78,7 @@ struct TrackRow: View {
         } else {
             false
         }
+        self.provider = provider
         self.playbackViewModel = playbackViewModel
         self.doubleTapBehavior = doubleTapBehavior
         self.currentSection = currentSection
@@ -130,6 +148,17 @@ struct TrackRow: View {
                     .lineLimit(1)
             }
 
+            // Provider indicator (Q=queue, C=context, A=autoplay)
+            if let symbol = providerSymbol {
+                Text(symbol)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(.quaternary)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            }
+
             Spacer()
 
             // Duration
@@ -178,7 +207,7 @@ struct TrackRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(isCurrentTrack ? Color.green.opacity(0.1) : Color.clear)
-        .opacity(isPlayedTrack ? 0.5 : 1.0)
+        .opacity(isPlayedTrack || isUnavailable ? 0.5 : 1.0)
         .contentShape(Rectangle())
         .contextMenu {
             TrackContextMenu(

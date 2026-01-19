@@ -26,14 +26,36 @@ struct QueueListView: View {
 
     @State private var scrollProxy: ScrollViewProxy?
 
-    /// Flattened queue: previous + current + next
-    private var allTracks: [Track] {
-        var tracks = store.previousTrackEntities
-        if let current = store.currentTrackEntity {
-            tracks.append(current)
+    /// Queue item with track and provider info
+    private struct QueueDisplayItem {
+        let track: Track
+        let provider: TrackProvider
+    }
+
+    /// Flattened queue with provider info: previous + current + next
+    private var allQueueItems: [QueueDisplayItem] {
+        var items: [QueueDisplayItem] = []
+
+        // Previous tracks
+        for entry in store.queue.previousTracks {
+            if let track = store.tracks[entry.trackId] {
+                items.append(QueueDisplayItem(track: track, provider: entry.provider))
+            }
         }
-        tracks.append(contentsOf: store.nextTrackEntities)
-        return tracks
+
+        // Current track
+        if let entry = store.queue.currentTrack, let track = store.tracks[entry.trackId] {
+            items.append(QueueDisplayItem(track: track, provider: entry.provider))
+        }
+
+        // Next tracks
+        for entry in store.queue.nextTracks {
+            if let track = store.tracks[entry.trackId] {
+                items.append(QueueDisplayItem(track: track, provider: entry.provider))
+            }
+        }
+
+        return items
     }
 
     /// Currently playing index (position after previous tracks)
@@ -61,7 +83,7 @@ struct QueueListView: View {
             // Scrollable content
             if let error = store.queue.errorMessage {
                 errorView(error)
-            } else if allTracks.isEmpty {
+            } else if allQueueItems.isEmpty {
                 emptyView
             } else {
                 normalModeContent
@@ -111,19 +133,20 @@ struct QueueListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(allTracks.enumerated()), id: \.offset) { index, track in
+                    ForEach(Array(allQueueItems.enumerated()), id: \.offset) { index, item in
                         TrackRow(
-                            track: track,
+                            track: item.track,
                             index: index,
                             currentlyPlayingURI: playbackViewModel.currentlyPlayingURI,
                             currentIndex: currentIndex,
+                            provider: item.provider,
                             playbackViewModel: playbackViewModel,
                             doubleTapBehavior: .playTrack,
                             currentSection: .queue,
                         )
                         .id(index)
 
-                        if index < allTracks.count - 1 {
+                        if index < allQueueItems.count - 1 {
                             Divider()
                                 .padding(.leading, 78)
                         }
@@ -170,7 +193,7 @@ struct QueueListView: View {
     // MARK: - Navigation
 
     private func scrollToCurrentTrack() {
-        guard currentIndex < allTracks.count else { return }
+        guard currentIndex < allQueueItems.count else { return }
         withAnimation {
             scrollProxy?.scrollTo(currentIndex, anchor: .center)
         }
