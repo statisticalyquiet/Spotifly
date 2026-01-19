@@ -295,7 +295,11 @@ final class PlaybackViewModel {
     func next() {
         do {
             try SpotifyPlayer.next()
-            // State update will come from Mercury callback
+            // Immediately reset position to 0 for responsive UI
+            positionAnchorMs = 0
+            positionAnchorTime = CACurrentMediaTime()
+            currentPositionMs = 0
+            updateNowPlayingInfo(forcePositionUpdate: true)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -304,7 +308,11 @@ final class PlaybackViewModel {
     func previous() {
         do {
             try SpotifyPlayer.previous()
-            // State update will come from Mercury callback
+            // Immediately reset position to 0 for responsive UI
+            positionAnchorMs = 0
+            positionAnchorTime = CACurrentMediaTime()
+            currentPositionMs = 0
+            updateNowPlayingInfo(forcePositionUpdate: true)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -337,11 +345,18 @@ final class PlaybackViewModel {
         updateNowPlayingInfo(forcePositionUpdate: true)
     }
 
-    /// Always returns true - Web API handles next track availability
-    var hasNext: Bool { true }
+    /// Returns true if there are tracks in the queue after the current track
+    var hasNext: Bool {
+        guard let store else { return false }
+        return !store.queue.nextTracks.isEmpty
+    }
 
-    /// Always returns true - Web API handles previous track availability
-    var hasPrevious: Bool { true }
+    /// Returns true if there are tracks before the current track or if we're past the start of the track
+    var hasPrevious: Bool {
+        guard let store else { return false }
+        // Allow previous if we have previous tracks or if we're more than 3 seconds into the current track
+        return !store.queue.previousTracks.isEmpty || currentPositionMs > 3000
+    }
 
     // MARK: - Media Keys & Now Playing
 
