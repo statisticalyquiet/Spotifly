@@ -100,8 +100,8 @@ struct QueueChangedNotification: Sendable {
     nonisolated let trackUri: String
 }
 
-/// Context resolved notification containing track URIs when a context (playlist/album) is loaded
-struct ContextResolvedNotification: Sendable {
+/// Context loaded notification containing track URIs when a context (playlist/album) is loaded
+struct ContextLoadedNotification: Sendable {
     nonisolated let contextUri: String
     nonisolated let currentTrackUri: String?
     nonisolated let currentTrackProvider: String?
@@ -129,8 +129,8 @@ private nonisolated(unsafe) let queueChangedSubject = PassthroughSubject<QueueCh
 /// Global subject for connection state updates (nonisolated for C callback access)
 private nonisolated(unsafe) let connectionStateSubject = CurrentValueSubject<LibrespotConnectionState?, Never>(nil)
 
-/// Global subject for context resolved notifications (nonisolated for C callback access)
-private nonisolated(unsafe) let contextResolvedSubject = PassthroughSubject<ContextResolvedNotification, Never>()
+/// Global subject for context loaded notifications (nonisolated for C callback access)
+private nonisolated(unsafe) let contextLoadedSubject = PassthroughSubject<ContextLoadedNotification, Never>()
 
 /// Registers the queue callback with Rust (must be called from nonisolated context)
 private nonisolated func registerQueueCallback() {
@@ -282,23 +282,23 @@ private nonisolated func handleQueueChangedCallback(_ jsonPtr: UnsafePointer<CCh
     }
 }
 
-/// Registers the context resolved callback with Rust (fires when a context is resolved)
-private nonisolated func registerContextResolvedCallback() {
-    spotifly_register_context_resolved_callback { jsonPtr in
-        handleContextResolvedCallback(jsonPtr)
+/// Registers the context loaded callback with Rust (fires when a context is loaded)
+private nonisolated func registerContextLoadedCallback() {
+    spotifly_register_context_loaded_callback { jsonPtr in
+        handleContextLoadedCallback(jsonPtr)
     }
 }
 
-/// C callback for context resolved notifications from Rust
-/// Fires immediately when a context (playlist, album, etc.) is resolved locally
-private nonisolated func handleContextResolvedCallback(_ jsonPtr: UnsafePointer<CChar>?) {
+/// C callback for context loaded notifications from Rust
+/// Fires immediately when a context (playlist, album, etc.) is loaded locally
+private nonisolated func handleContextLoadedCallback(_ jsonPtr: UnsafePointer<CChar>?) {
     guard let jsonPtr else {
-        debugLog("SpotifyPlayer", "handleContextResolvedCallback: jsonPtr is nil")
+        debugLog("SpotifyPlayer", "handleContextLoadedCallback: jsonPtr is nil")
         return
     }
 
     let jsonString = String(cString: jsonPtr)
-    debugLog("SpotifyPlayer", "Context resolved callback: \(jsonString.prefix(200))...")
+    debugLog("SpotifyPlayer", "Context loaded callback: \(jsonString.prefix(200))...")
 
     guard let data = jsonString.data(using: .utf8) else {
         return
@@ -309,7 +309,7 @@ private nonisolated func handleContextResolvedCallback(_ jsonPtr: UnsafePointer<
             return
         }
 
-        let notification = ContextResolvedNotification(
+        let notification = ContextLoadedNotification(
             contextUri: json["context_uri"] as? String ?? "",
             currentTrackUri: json["current_track_uri"] as? String,
             currentTrackProvider: json["current_track_provider"] as? String,
@@ -321,12 +321,12 @@ private nonisolated func handleContextResolvedCallback(_ jsonPtr: UnsafePointer<
 
         debugLog(
             "SpotifyPlayer",
-            "Context resolved: \(notification.contextUri), next=\(notification.nextTrackUris.count), prev=\(notification.prevTrackUris.count)",
+            "Context loaded: \(notification.contextUri), next=\(notification.nextTrackUris.count), prev=\(notification.prevTrackUris.count)",
         )
 
-        contextResolvedSubject.send(notification)
+        contextLoadedSubject.send(notification)
     } catch {
-        debugLog("SpotifyPlayer", "Failed to parse context resolved JSON: \(error)")
+        debugLog("SpotifyPlayer", "Failed to parse context loaded JSON: \(error)")
     }
 }
 
@@ -541,7 +541,7 @@ enum SpotifyPlayer {
         registerSessionDisconnectedCallback()
         registerSessionConnectedCallback()
         registerConnectionStateCallback()
-        registerContextResolvedCallback()
+        registerContextLoadedCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
@@ -622,11 +622,11 @@ enum SpotifyPlayer {
         connectionStateSubject.eraseToAnyPublisher()
     }
 
-    /// Returns a publisher for context resolved notifications.
-    /// Fires immediately when a context (playlist, album, etc.) is resolved locally.
+    /// Returns a publisher for context loaded notifications.
+    /// Fires immediately when a context (playlist, album, etc.) is loaded locally.
     /// Contains the full list of track URIs in the context.
-    static var contextResolved: AnyPublisher<ContextResolvedNotification, Never> {
-        contextResolvedSubject.eraseToAnyPublisher()
+    static var contextLoaded: AnyPublisher<ContextLoadedNotification, Never> {
+        contextLoadedSubject.eraseToAnyPublisher()
     }
 
     /// Returns the current connection state synchronously.

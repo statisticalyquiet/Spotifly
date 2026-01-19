@@ -16,7 +16,7 @@ final class QueueService {
     private let store: AppStore
     private let tokenProvider: () async -> String
     private var queueSubscription: AnyCancellable?
-    private var contextResolvedSubscription: AnyCancellable?
+    private var contextLoadedSubscription: AnyCancellable?
     private var metadataFetchTask: Task<Void, Never>?
     private var pendingTrackIds: Set<String> = []
     private var debounceTask: Task<Void, Never>?
@@ -25,7 +25,7 @@ final class QueueService {
         self.store = store
         self.tokenProvider = tokenProvider
         setupQueueSubscription()
-        setupContextResolvedSubscription()
+        setupContextLoadedSubscription()
     }
 
     // MARK: - Queue Subscriptions
@@ -42,16 +42,16 @@ final class QueueService {
 
     /// Subscribe to context resolved events from Spirc
     /// This fires immediately when a context is resolved locally (before Spotify servers acknowledge)
-    private func setupContextResolvedSubscription() {
-        contextResolvedSubscription = SpotifyPlayer.contextResolved
+    private func setupContextLoadedSubscription() {
+        contextLoadedSubscription = SpotifyPlayer.contextLoaded
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
-                self?.handleContextResolved(notification)
+                self?.handleContextLoaded(notification)
             }
     }
 
     /// Handle context resolved notification (fires immediately when context is loaded)
-    private func handleContextResolved(_ notification: ContextResolvedNotification) {
+    private func handleContextLoaded(_ notification: ContextLoadedNotification) {
         debugLog("QueueService", "Context resolved: \(notification.contextUri), next=\(notification.nextTrackUris.count), prev=\(notification.prevTrackUris.count)")
 
         // Convert URIs to QueueEntries

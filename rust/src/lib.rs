@@ -55,7 +55,7 @@ static SESSION_DISCONNECTED_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
     Lazy::new(|| Mutex::new(None));
 static SESSION_CONNECTED_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
     Lazy::new(|| Mutex::new(None));
-static CONTEXT_RESOLVED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
+static CONTEXT_LOADED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
@@ -158,7 +158,7 @@ struct ConnectionStateInfo {
 }
 
 #[derive(Serialize)]
-struct ContextResolvedInfo {
+struct ContextLoadedInfo {
     context_uri: String,
     current_track_uri: Option<String>,
     current_track_provider: Option<String>,
@@ -310,10 +310,10 @@ pub extern "C" fn spotifly_register_session_connected_callback(callback: extern 
 /// The callback receives JSON with context_uri, current track, next tracks, and previous tracks.
 /// This fires immediately when context is resolved locally (before Spotify servers acknowledge).
 #[no_mangle]
-pub extern "C" fn spotifly_register_context_resolved_callback(
+pub extern "C" fn spotifly_register_context_loaded_callback(
     callback: extern "C" fn(*const c_char),
 ) {
-    let mut cb = CONTEXT_RESOLVED_CALLBACK.lock().unwrap();
+    let mut cb = CONTEXT_LOADED_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
 
@@ -642,6 +642,35 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 }
                             }
                         }
+                        Some(PlayerEvent::ContextLoaded {
+                            context_uri,
+                            current_track_uri,
+                            current_track_provider,
+                            next_track_uris,
+                            next_track_providers,
+                            prev_track_uris,
+                            prev_track_providers,
+                        }) => {
+                            debug!("ContextLoaded event: {}", context_uri);
+                            let cb_guard = CONTEXT_LOADED_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                let info = ContextLoadedInfo {
+                                    context_uri,
+                                    current_track_uri,
+                                    current_track_provider,
+                                    next_track_uris,
+                                    next_track_providers,
+                                    prev_track_uris,
+                                    prev_track_providers,
+                                };
+                                if let Ok(json) = serde_json::to_string(&info) {
+                                    let c_str = CString::new(json).unwrap();
+                                    cb(c_str.as_ptr());
+                                }
+                            }
+                        }
                         Some(PlayerEvent::SessionDisconnected { connection_id, user_name }) => {
                             debug!("SessionDisconnected event: connection_id={}, user={}", connection_id, user_name);
                             // Update session state
@@ -821,19 +850,12 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
         ..Default::default()
     };
 
-    // Create context resolved callback that bridges to our global callback
-    let context_resolved_callback: Option<librespot_connect::ContextResolvedCallback> =
-        Some(Box::new(|data| {
-            send_context_resolved_callback(data);
-        }));
-
     match Spirc::new(
         connect_config,
         session.clone(),
         credentials.clone(),
         player,
         mixer as Arc<dyn Mixer>,
-        context_resolved_callback,
     )
     .await
     {
@@ -1116,48 +1138,6 @@ fn process_and_send_queue(player_state: PlayerState) {
         }
     } else {
         debug!("No callback registered, skipping queue update");
-    }
-}
-
-/// Process and send context resolved callback to Swift
-fn send_context_resolved_callback(data: librespot_connect::ContextResolvedData) {
-    debug!("send_context_resolved_callback called");
-
-    let cb_guard = CONTEXT_RESOLVED_CALLBACK.lock().unwrap();
-    if let Some(callback) = *cb_guard {
-        let cb = callback;
-        drop(cb_guard);
-
-        let info = ContextResolvedInfo {
-            context_uri: data.context_uri,
-            current_track_uri: data.current_track_uri,
-            current_track_provider: data.current_track_provider,
-            next_track_uris: data.next_track_uris,
-            next_track_providers: data.next_track_providers,
-            prev_track_uris: data.prev_track_uris,
-            prev_track_providers: data.prev_track_providers,
-        };
-
-        debug!(
-            "Context resolved: context={}, next={}, prev={}",
-            info.context_uri,
-            info.next_track_uris.len(),
-            info.prev_track_uris.len()
-        );
-
-        if let Ok(json) = serde_json::to_string(&info) {
-            debug!(
-                "Sending context resolved JSON ({} bytes) to Swift callback",
-                json.len()
-            );
-            let c_str = CString::new(json).unwrap();
-            cb(c_str.as_ptr());
-            debug!("Swift callback returned");
-        } else {
-            debug!("Failed to serialize context resolved info to JSON");
-        }
-    } else {
-        debug!("No context resolved callback registered");
     }
 }
 

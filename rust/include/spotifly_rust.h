@@ -153,14 +153,14 @@ void spotifly_register_session_connected_callback(SessionConnectedCallback callb
 /// Use this to check if playback commands will be accepted.
 int32_t spotifly_is_session_connected(void);
 
-/// Callback function type for context resolved notifications.
+/// Callback function type for context loaded notifications.
 /// Receives a JSON string containing context_uri, current track, next tracks, and previous tracks.
-typedef void (*ContextResolvedCallback)(const char* context_json);
+typedef void (*ContextLoadedCallback)(const char* context_json);
 
-/// Registers a callback to receive context resolved notifications.
-/// Called when a context (playlist, album, etc.) is resolved with the list of track URIs.
-/// This fires immediately when context is resolved locally (before Spotify servers acknowledge).
-void spotifly_register_context_resolved_callback(ContextResolvedCallback callback);
+/// Registers a callback to receive context loaded notifications.
+/// Called when a context (playlist, album, etc.) is loaded with the list of track URIs.
+/// This fires immediately when context is loaded locally (before Spotify servers acknowledge).
+void spotifly_register_context_loaded_callback(ContextLoadedCallback callback);
 
 /// Callback function type for connection state change notifications.
 /// Receives a JSON string containing full connection state.
