@@ -265,21 +265,17 @@ struct LoggedInView: View {
     }
 
     private func albumContextMenu(album: Album) -> some View {
-        let tracks = album.trackIds.compactMap { store.tracks[$0] }
         let isInLibrary = store.userAlbumIds.contains(album.id)
 
         return Menu {
             Button {
                 Task {
                     let token = await session.validAccessToken()
-                    for track in tracks {
-                        await playbackViewModel.addToQueue(uri: track.uri, accessToken: token)
-                    }
+                    await playbackViewModel.addToQueue(uri: album.uri, accessToken: token)
                 }
             } label: {
                 Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
             }
-            .disabled(tracks.isEmpty)
 
             Divider()
 
@@ -358,7 +354,6 @@ struct LoggedInView: View {
     }
 
     private func playlistContextMenu(playlist: Playlist) -> some View {
-        let tracks = playlist.trackIds.compactMap { store.tracks[$0] }
         let isOwner = playlist.ownerId == session.userId
         let isInLibrary = store.userPlaylistIds.contains(playlist.id)
 
@@ -366,14 +361,11 @@ struct LoggedInView: View {
             Button {
                 Task {
                     let token = await session.validAccessToken()
-                    for track in tracks {
-                        await playbackViewModel.addToQueue(uri: track.uri, accessToken: token)
-                    }
+                    await playbackViewModel.addToQueue(uri: playlist.uri, accessToken: token)
                 }
             } label: {
                 Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
             }
-            .disabled(tracks.isEmpty)
 
             Divider()
 
