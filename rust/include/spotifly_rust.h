@@ -170,6 +170,14 @@ typedef void (*ContextLoadedCallback)(const char* context_json);
 /// This fires immediately when context is loaded locally (before Spotify servers acknowledge).
 void spotifly_register_context_loaded_callback(ContextLoadedCallback callback);
 
+/// Callback function type for added to queue notifications.
+/// Receives a JSON string containing track_uri of the queued track.
+typedef void (*AddedToQueueCallback)(const char* added_json);
+
+/// Registers a callback to receive added to queue notifications.
+/// Called when a track is manually added to the queue (via add_to_queue).
+void spotifly_register_added_to_queue_callback(AddedToQueueCallback callback);
+
 /// Callback function type for connection state change notifications.
 /// Receives a JSON string containing full connection state.
 typedef void (*ConnectionStateCallback)(const char* state_json);

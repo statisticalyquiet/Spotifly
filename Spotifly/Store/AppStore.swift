@@ -490,6 +490,16 @@ final class AppStore {
         queue.nextTracks = next
     }
 
+    /// Insert a track into the queue after any existing manually queued items (provider: .queue),
+    /// but before context tracks. This is used for immediate UI feedback when adding to queue.
+    func insertQueuedTrack(trackId: String) {
+        let entry = QueueEntry(trackId: trackId, provider: .queue)
+
+        // Find the position to insert: after all existing .queue items, before context items
+        let insertIndex = queue.nextTracks.firstIndex { $0.provider != .queue } ?? queue.nextTracks.count
+        queue.nextTracks.insert(entry, at: insertIndex)
+    }
+
     /// Set queue loading state
     func setQueueLoading(_ isLoading: Bool) {
         queue.isLoading = isLoading

@@ -59,6 +59,8 @@ static SESSION_CLIENT_CHANGED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c
     Lazy::new(|| Mutex::new(None));
 static CONTEXT_LOADED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
+static ADDED_TO_QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
+    Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Session state tracking - guards playback commands until session is ready
@@ -144,6 +146,11 @@ struct LoadingNotification {
 
 #[derive(Serialize)]
 struct QueueChangedNotification {
+    track_uri: String,
+}
+
+#[derive(Serialize)]
+struct AddedToQueueNotification {
     track_uri: String,
 }
 
@@ -333,6 +340,17 @@ pub extern "C" fn spotifly_register_context_loaded_callback(
     callback: extern "C" fn(*const c_char),
 ) {
     let mut cb = CONTEXT_LOADED_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Registers a callback to receive added to queue notifications.
+/// Called when a track is manually added to the queue (via add_to_queue).
+/// The callback receives JSON with track_uri of the queued track.
+#[no_mangle]
+pub extern "C" fn spotifly_register_added_to_queue_callback(
+    callback: extern "C" fn(*const c_char),
+) {
+    let mut cb = ADDED_TO_QUEUE_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
 
@@ -709,6 +727,20 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                     prev_track_providers,
                                 };
                                 if let Ok(json) = serde_json::to_string(&info) {
+                                    let c_str = CString::new(json).unwrap();
+                                    cb(c_str.as_ptr());
+                                }
+                            }
+                        }
+                        Some(PlayerEvent::AddedToQueue { track_id }) => {
+                            let track_uri = track_id.to_string();
+                            debug!("AddedToQueue event: {}", track_uri);
+                            let cb_guard = ADDED_TO_QUEUE_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                let notification = AddedToQueueNotification { track_uri };
+                                if let Ok(json) = serde_json::to_string(&notification) {
                                     let c_str = CString::new(json).unwrap();
                                     cb(c_str.as_ptr());
                                 }

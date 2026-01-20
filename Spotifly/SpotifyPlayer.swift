@@ -100,6 +100,11 @@ struct QueueChangedNotification: Sendable {
     nonisolated let trackUri: String
 }
 
+/// Added to queue notification containing the track URI that was manually queued
+struct AddedToQueueNotification: Sendable {
+    nonisolated let trackUri: String
+}
+
 /// Context loaded notification containing track URIs when a context (playlist/album) is loaded
 struct ContextLoadedNotification: Sendable {
     nonisolated let contextUri: String
@@ -133,6 +138,9 @@ struct LibrespotConnectionState: Sendable, Equatable, Encodable {
 
 /// Global subject for queue changed notifications (nonisolated for C callback access)
 private nonisolated(unsafe) let queueChangedSubject = PassthroughSubject<QueueChangedNotification, Never>()
+
+/// Global subject for added to queue notifications (nonisolated for C callback access)
+private nonisolated(unsafe) let addedToQueueSubject = PassthroughSubject<AddedToQueueNotification, Never>()
 
 /// Global subject for connection state updates (nonisolated for C callback access)
 private nonisolated(unsafe) let connectionStateSubject = CurrentValueSubject<LibrespotConnectionState?, Never>(nil)
@@ -290,6 +298,42 @@ private nonisolated func handleQueueChangedCallback(_ jsonPtr: UnsafePointer<CCh
 
     } catch {
         debugLog("SpotifyPlayer", "Failed to parse queue changed JSON: \(error)")
+    }
+}
+
+/// Registers the added to queue callback with Rust (fires when track is manually queued)
+private nonisolated func registerAddedToQueueCallback() {
+    spotifly_register_added_to_queue_callback { jsonPtr in
+        handleAddedToQueueCallback(jsonPtr)
+    }
+}
+
+/// C callback for added to queue notifications from Rust
+/// Fires when a track is manually added to the queue
+private nonisolated func handleAddedToQueueCallback(_ jsonPtr: UnsafePointer<CChar>?) {
+    guard let jsonPtr else {
+        debugLog("SpotifyPlayer", "handleAddedToQueueCallback: jsonPtr is nil")
+        return
+    }
+
+    let jsonString = String(cString: jsonPtr)
+    debugLog("SpotifyPlayer", "Added to queue callback: \(jsonString)")
+
+    guard let data = jsonString.data(using: .utf8) else {
+        return
+    }
+
+    do {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        let trackUri = json["track_uri"] as? String ?? ""
+        let notification = AddedToQueueNotification(trackUri: trackUri)
+        addedToQueueSubject.send(notification)
+
+    } catch {
+        debugLog("SpotifyPlayer", "Failed to parse added to queue JSON: \(error)")
     }
 }
 
@@ -594,6 +638,7 @@ enum SpotifyPlayer {
         registerVolumeCallback()
         registerLoadingCallback()
         registerQueueChangedCallback()
+        registerAddedToQueueCallback()
         registerSessionDisconnectedCallback()
         registerSessionConnectedCallback()
         registerSessionClientChangedCallback()
@@ -654,6 +699,12 @@ enum SpotifyPlayer {
     /// Fires when a remote device adds a track to the queue.
     static var queueChanged: AnyPublisher<QueueChangedNotification, Never> {
         queueChangedSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher for added to queue notifications.
+    /// Fires when a track is manually added to the queue.
+    static var addedToQueue: AnyPublisher<AddedToQueueNotification, Never> {
+        addedToQueueSubject.eraseToAnyPublisher()
     }
 
     /// Returns a publisher that emits when the session is disconnected and needs reinitialization.

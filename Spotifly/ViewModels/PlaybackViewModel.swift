@@ -797,7 +797,7 @@ final class PlaybackViewModel {
     private func syncPositionAnchor() {
         let rustPosition = SpotifyPlayer.positionMs
         // Don't overwrite valid position with 0 - Rust may not have position ready yet
-        if rustPosition == 0 && positionAnchorMs > 0 {
+        if rustPosition == 0, positionAnchorMs > 0 {
             debugLog("PlaybackViewModel", "syncPositionAnchor: skipping - rustPosition=0 but have valid anchor=\(positionAnchorMs)")
             return
         }

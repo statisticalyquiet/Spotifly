@@ -17,6 +17,7 @@ final class QueueService {
     private let tokenProvider: () async -> String
     private var queueSubscription: AnyCancellable?
     private var contextLoadedSubscription: AnyCancellable?
+    private var addedToQueueSubscription: AnyCancellable?
     private var metadataFetchTask: Task<Void, Never>?
     private var pendingTrackIds: Set<String> = []
     private var debounceTask: Task<Void, Never>?
@@ -26,6 +27,7 @@ final class QueueService {
         self.tokenProvider = tokenProvider
         setupQueueSubscription()
         setupContextLoadedSubscription()
+        setupAddedToQueueSubscription()
     }
 
     // MARK: - Queue Subscriptions
@@ -48,6 +50,32 @@ final class QueueService {
             .sink { [weak self] notification in
                 self?.handleContextLoaded(notification)
             }
+    }
+
+    /// Subscribe to added to queue events from Spirc
+    /// This fires when a track is manually added to the queue
+    private func setupAddedToQueueSubscription() {
+        addedToQueueSubscription = SpotifyPlayer.addedToQueue
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                self?.handleAddedToQueue(notification)
+            }
+    }
+
+    /// Handle added to queue notification (fires when track is manually queued)
+    private func handleAddedToQueue(_ notification: AddedToQueueNotification) {
+        guard let trackId = SpotifyAPI.parseTrackURI(notification.trackUri) else {
+            debugLog("QueueService", "Failed to parse track URI: \(notification.trackUri)")
+            return
+        }
+
+        debugLog("QueueService", "Track added to queue: \(trackId)")
+
+        // Insert the track into the queue after existing queue items, before context items
+        store.insertQueuedTrack(trackId: trackId)
+
+        // Fetch metadata for the track if not already in store
+        fetchTrackMetadata(for: [trackId])
     }
 
     /// Handle context resolved notification (fires immediately when context is loaded)
