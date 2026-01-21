@@ -105,15 +105,30 @@ struct AddedToQueueNotification: Sendable {
     nonisolated let trackUri: String
 }
 
-/// Context loaded notification containing track URIs when a context (playlist/album) is loaded
+/// Track info in a set queue notification
+struct SetQueueTrackInfo: Sendable {
+    nonisolated let uri: String
+    nonisolated let provider: String
+}
+
+/// Set queue notification containing the full queue state
+struct SetQueueNotification: Sendable {
+    nonisolated let nextTracks: [SetQueueTrackInfo]
+    nonisolated let prevTracks: [SetQueueTrackInfo]
+}
+
+/// Track info in a context loaded notification
+struct ContextTrackInfo: Sendable {
+    nonisolated let uri: String
+    nonisolated let provider: String
+}
+
+/// Context loaded notification containing track info when a context (playlist/album) is loaded
 struct ContextLoadedNotification: Sendable {
     nonisolated let contextUri: String
-    nonisolated let currentTrackUri: String?
-    nonisolated let currentTrackProvider: String?
-    nonisolated let nextTrackUris: [String]
-    nonisolated let nextTrackProviders: [String]
-    nonisolated let prevTrackUris: [String]
-    nonisolated let prevTrackProviders: [String]
+    nonisolated let currentTrack: ContextTrackInfo?
+    nonisolated let nextTracks: [ContextTrackInfo]
+    nonisolated let prevTracks: [ContextTrackInfo]
 }
 
 /// Session client changed notification containing info about the controlling Spotify client
@@ -141,6 +156,9 @@ private nonisolated(unsafe) let queueChangedSubject = PassthroughSubject<QueueCh
 
 /// Global subject for added to queue notifications (nonisolated for C callback access)
 private nonisolated(unsafe) let addedToQueueSubject = PassthroughSubject<AddedToQueueNotification, Never>()
+
+/// Global subject for set queue notifications (nonisolated for C callback access)
+private nonisolated(unsafe) let setQueueSubject = PassthroughSubject<SetQueueNotification, Never>()
 
 /// Global subject for connection state updates (nonisolated for C callback access)
 private nonisolated(unsafe) let connectionStateSubject = CurrentValueSubject<LibrespotConnectionState?, Never>(nil)
@@ -337,6 +355,59 @@ private nonisolated func handleAddedToQueueCallback(_ jsonPtr: UnsafePointer<CCh
     }
 }
 
+/// Registers the set queue callback with Rust (fires when queue is modified)
+private nonisolated func registerSetQueueCallback() {
+    spotifly_register_set_queue_callback { jsonPtr in
+        handleSetQueueCallback(jsonPtr)
+    }
+}
+
+/// C callback for set queue notifications from Rust
+/// Fires when the queue is set/modified (e.g., from mobile app)
+private nonisolated func handleSetQueueCallback(_ jsonPtr: UnsafePointer<CChar>?) {
+    guard let jsonPtr else {
+        debugLog("SpotifyPlayer", "handleSetQueueCallback: jsonPtr is nil")
+        return
+    }
+
+    let jsonString = String(cString: jsonPtr)
+    debugLog("SpotifyPlayer", "Set queue callback: \(jsonString.prefix(200))...")
+
+    guard let data = jsonString.data(using: .utf8) else {
+        return
+    }
+
+    do {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        // Parse next_tracks array
+        let nextTracksJson = json["next_tracks"] as? [[String: Any]] ?? []
+        let nextTracks = nextTracksJson.map { track in
+            SetQueueTrackInfo(
+                uri: track["uri"] as? String ?? "",
+                provider: track["provider"] as? String ?? "",
+            )
+        }
+
+        // Parse prev_tracks array
+        let prevTracksJson = json["prev_tracks"] as? [[String: Any]] ?? []
+        let prevTracks = prevTracksJson.map { track in
+            SetQueueTrackInfo(
+                uri: track["uri"] as? String ?? "",
+                provider: track["provider"] as? String ?? "",
+            )
+        }
+
+        let notification = SetQueueNotification(nextTracks: nextTracks, prevTracks: prevTracks)
+        setQueueSubject.send(notification)
+
+    } catch {
+        debugLog("SpotifyPlayer", "Failed to parse set queue JSON: \(error)")
+    }
+}
+
 /// Registers the context loaded callback with Rust (fires when a context is loaded)
 private nonisolated func registerContextLoadedCallback() {
     spotifly_register_context_loaded_callback { jsonPtr in
@@ -364,19 +435,43 @@ private nonisolated func handleContextLoadedCallback(_ jsonPtr: UnsafePointer<CC
             return
         }
 
+        // Parse current_track (optional object with uri and provider)
+        var currentTrack: ContextTrackInfo?
+        if let currentTrackJson = json["current_track"] as? [String: Any] {
+            currentTrack = ContextTrackInfo(
+                uri: currentTrackJson["uri"] as? String ?? "",
+                provider: currentTrackJson["provider"] as? String ?? "",
+            )
+        }
+
+        // Parse next_tracks array
+        let nextTracksJson = json["next_tracks"] as? [[String: Any]] ?? []
+        let nextTracks = nextTracksJson.map { track in
+            ContextTrackInfo(
+                uri: track["uri"] as? String ?? "",
+                provider: track["provider"] as? String ?? "",
+            )
+        }
+
+        // Parse prev_tracks array
+        let prevTracksJson = json["prev_tracks"] as? [[String: Any]] ?? []
+        let prevTracks = prevTracksJson.map { track in
+            ContextTrackInfo(
+                uri: track["uri"] as? String ?? "",
+                provider: track["provider"] as? String ?? "",
+            )
+        }
+
         let notification = ContextLoadedNotification(
             contextUri: json["context_uri"] as? String ?? "",
-            currentTrackUri: json["current_track_uri"] as? String,
-            currentTrackProvider: json["current_track_provider"] as? String,
-            nextTrackUris: json["next_track_uris"] as? [String] ?? [],
-            nextTrackProviders: json["next_track_providers"] as? [String] ?? [],
-            prevTrackUris: json["prev_track_uris"] as? [String] ?? [],
-            prevTrackProviders: json["prev_track_providers"] as? [String] ?? [],
+            currentTrack: currentTrack,
+            nextTracks: nextTracks,
+            prevTracks: prevTracks,
         )
 
         debugLog(
             "SpotifyPlayer",
-            "Context loaded: \(notification.contextUri), next=\(notification.nextTrackUris.count), prev=\(notification.prevTrackUris.count)",
+            "Context loaded: \(notification.contextUri), next=\(notification.nextTracks.count), prev=\(notification.prevTracks.count)",
         )
 
         contextLoadedSubject.send(notification)
@@ -639,6 +734,7 @@ enum SpotifyPlayer {
         registerLoadingCallback()
         registerQueueChangedCallback()
         registerAddedToQueueCallback()
+        registerSetQueueCallback()
         registerSessionDisconnectedCallback()
         registerSessionConnectedCallback()
         registerSessionClientChangedCallback()
@@ -705,6 +801,12 @@ enum SpotifyPlayer {
     /// Fires when a track is manually added to the queue.
     static var addedToQueue: AnyPublisher<AddedToQueueNotification, Never> {
         addedToQueueSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher for set queue notifications.
+    /// Fires when the queue is set/modified (e.g., from mobile app set_queue command).
+    static var setQueue: AnyPublisher<SetQueueNotification, Never> {
+        setQueueSubject.eraseToAnyPublisher()
     }
 
     /// Returns a publisher that emits when the session is disconnected and needs reinitialization.

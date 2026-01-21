@@ -61,6 +61,8 @@ static CONTEXT_LOADED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>
     Lazy::new(|| Mutex::new(None));
 static ADDED_TO_QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
+static SET_QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
+    Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Session state tracking - guards playback commands until session is ready
@@ -145,13 +147,20 @@ struct LoadingNotification {
 }
 
 #[derive(Serialize)]
-struct QueueChangedNotification {
+struct AddedToQueueNotification {
     track_uri: String,
 }
 
 #[derive(Serialize)]
-struct AddedToQueueNotification {
-    track_uri: String,
+struct SetQueueNotification {
+    next_tracks: Vec<QueueTrackInfo>,
+    prev_tracks: Vec<QueueTrackInfo>,
+}
+
+#[derive(Serialize)]
+struct QueueTrackInfo {
+    uri: String,
+    provider: String,
 }
 
 #[derive(Serialize)]
@@ -169,12 +178,15 @@ struct ConnectionStateInfo {
 #[derive(Serialize)]
 struct ContextLoadedInfo {
     context_uri: String,
-    current_track_uri: Option<String>,
-    current_track_provider: Option<String>,
-    next_track_uris: Vec<String>,
-    next_track_providers: Vec<String>,
-    prev_track_uris: Vec<String>,
-    prev_track_providers: Vec<String>,
+    current_track: Option<ContextTrackInfo>,
+    next_tracks: Vec<ContextTrackInfo>,
+    prev_tracks: Vec<ContextTrackInfo>,
+}
+
+#[derive(Serialize)]
+struct ContextTrackInfo {
+    uri: String,
+    provider: String,
 }
 
 #[derive(Serialize)]
@@ -351,6 +363,15 @@ pub extern "C" fn spotifly_register_added_to_queue_callback(
     callback: extern "C" fn(*const c_char),
 ) {
     let mut cb = ADDED_TO_QUEUE_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Registers a callback to receive set queue notifications.
+/// Called when the queue is set/modified (via set_queue command from mobile app).
+/// The callback receives JSON with next_tracks and prev_tracks arrays containing uri and provider.
+#[no_mangle]
+pub extern "C" fn spotifly_register_set_queue_callback(callback: extern "C" fn(*const c_char)) {
+    let mut cb = SET_QUEUE_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
 
@@ -690,48 +711,6 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 }
                             }
                         }
-                        Some(PlayerEvent::QueueChanged { track_uri }) => {
-                            debug!("QueueChanged event: {}", track_uri);
-                            let cb_guard = QUEUE_CHANGED_CALLBACK.lock().unwrap();
-                            if let Some(callback) = *cb_guard {
-                                let cb = callback;
-                                drop(cb_guard);
-                                let notification = QueueChangedNotification { track_uri };
-                                if let Ok(json) = serde_json::to_string(&notification) {
-                                    let c_str = CString::new(json).unwrap();
-                                    cb(c_str.as_ptr());
-                                }
-                            }
-                        }
-                        Some(PlayerEvent::ContextLoaded {
-                            context_uri,
-                            current_track_uri,
-                            current_track_provider,
-                            next_track_uris,
-                            next_track_providers,
-                            prev_track_uris,
-                            prev_track_providers,
-                        }) => {
-                            debug!("ContextLoaded event: {}", context_uri);
-                            let cb_guard = CONTEXT_LOADED_CALLBACK.lock().unwrap();
-                            if let Some(callback) = *cb_guard {
-                                let cb = callback;
-                                drop(cb_guard);
-                                let info = ContextLoadedInfo {
-                                    context_uri,
-                                    current_track_uri,
-                                    current_track_provider,
-                                    next_track_uris,
-                                    next_track_providers,
-                                    prev_track_uris,
-                                    prev_track_providers,
-                                };
-                                if let Ok(json) = serde_json::to_string(&info) {
-                                    let c_str = CString::new(json).unwrap();
-                                    cb(c_str.as_ptr());
-                                }
-                            }
-                        }
                         Some(PlayerEvent::AddedToQueue { track_id }) => {
                             let track_uri = track_id.to_string();
                             debug!("AddedToQueue event: {}", track_uri);
@@ -741,6 +720,70 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 drop(cb_guard);
                                 let notification = AddedToQueueNotification { track_uri };
                                 if let Ok(json) = serde_json::to_string(&notification) {
+                                    let c_str = CString::new(json).unwrap();
+                                    cb(c_str.as_ptr());
+                                }
+                            }
+                        }
+                        Some(PlayerEvent::SetQueue {
+                            next_tracks,
+                            prev_tracks,
+                        }) => {
+                            debug!(
+                                "SetQueue event: next={}, prev={}",
+                                next_tracks.len(),
+                                prev_tracks.len()
+                            );
+                            let cb_guard = SET_QUEUE_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                let notification = SetQueueNotification {
+                                    next_tracks: next_tracks
+                                        .into_iter()
+                                        .map(|(uri, provider)| QueueTrackInfo { uri, provider })
+                                        .collect(),
+                                    prev_tracks: prev_tracks
+                                        .into_iter()
+                                        .map(|(uri, provider)| QueueTrackInfo { uri, provider })
+                                        .collect(),
+                                };
+                                if let Ok(json) = serde_json::to_string(&notification) {
+                                    let c_str = CString::new(json).unwrap();
+                                    cb(c_str.as_ptr());
+                                }
+                            }
+                        }
+                        Some(PlayerEvent::ContextLoaded {
+                            context_uri,
+                            current_track,
+                            next_tracks,
+                            prev_tracks,
+                        }) => {
+                            debug!(
+                                "ContextLoaded event: context={}, next={}, prev={}",
+                                context_uri,
+                                next_tracks.len(),
+                                prev_tracks.len()
+                            );
+                            let cb_guard = CONTEXT_LOADED_CALLBACK.lock().unwrap();
+                            if let Some(callback) = *cb_guard {
+                                let cb = callback;
+                                drop(cb_guard);
+                                let info = ContextLoadedInfo {
+                                    context_uri,
+                                    current_track: current_track
+                                        .map(|(uri, provider)| ContextTrackInfo { uri, provider }),
+                                    next_tracks: next_tracks
+                                        .into_iter()
+                                        .map(|(uri, provider)| ContextTrackInfo { uri, provider })
+                                        .collect(),
+                                    prev_tracks: prev_tracks
+                                        .into_iter()
+                                        .map(|(uri, provider)| ContextTrackInfo { uri, provider })
+                                        .collect(),
+                                };
+                                if let Ok(json) = serde_json::to_string(&info) {
                                     let c_str = CString::new(json).unwrap();
                                     cb(c_str.as_ptr());
                                 }

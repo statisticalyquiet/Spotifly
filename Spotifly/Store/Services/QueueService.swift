@@ -18,6 +18,7 @@ final class QueueService {
     private var queueSubscription: AnyCancellable?
     private var contextLoadedSubscription: AnyCancellable?
     private var addedToQueueSubscription: AnyCancellable?
+    private var setQueueSubscription: AnyCancellable?
     private var metadataFetchTask: Task<Void, Never>?
     private var pendingTrackIds: Set<String> = []
     private var debounceTask: Task<Void, Never>?
@@ -28,6 +29,7 @@ final class QueueService {
         setupQueueSubscription()
         setupContextLoadedSubscription()
         setupAddedToQueueSubscription()
+        setupSetQueueSubscription()
     }
 
     // MARK: - Queue Subscriptions
@@ -78,32 +80,55 @@ final class QueueService {
         fetchTrackMetadata(for: [trackId])
     }
 
+    /// Subscribe to set queue events from Spirc
+    /// This fires immediately when the queue is set/modified (e.g., from mobile app)
+    private func setupSetQueueSubscription() {
+        setQueueSubscription = SpotifyPlayer.setQueue
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                self?.handleSetQueue(notification)
+            }
+    }
+
+    /// Handle set queue notification (fires immediately when queue is set)
+    private func handleSetQueue(_ notification: SetQueueNotification) {
+        debugLog("QueueService", "Set queue: next=\(notification.nextTracks.count), prev=\(notification.prevTracks.count)")
+
+        // Convert to QueueEntries
+        func toQueueEntry(_ trackInfo: SetQueueTrackInfo) -> QueueEntry? {
+            guard let trackId = SpotifyAPI.parseTrackURI(trackInfo.uri) else { return nil }
+            return QueueEntry(trackId: trackId, provider: TrackProvider(from: trackInfo.provider))
+        }
+
+        let nextEntries: [QueueEntry] = notification.nextTracks.compactMap { toQueueEntry($0) }
+        let prevEntries: [QueueEntry] = notification.prevTracks.compactMap { toQueueEntry($0) }
+
+        // Update queue - preserve current track since set_queue doesn't include it
+        store.setQueue(previous: prevEntries, current: nil, next: nextEntries)
+
+        // Fetch track metadata for IDs not already in store
+        let allIds = prevEntries.map(\.trackId) + nextEntries.map(\.trackId)
+        fetchTrackMetadata(for: allIds)
+    }
+
     /// Handle context resolved notification (fires immediately when context is loaded)
     private func handleContextLoaded(_ notification: ContextLoadedNotification) {
-        debugLog("QueueService", "Context resolved: \(notification.contextUri), next=\(notification.nextTrackUris.count), prev=\(notification.prevTrackUris.count)")
+        debugLog("QueueService", "Context resolved: \(notification.contextUri), next=\(notification.nextTracks.count), prev=\(notification.prevTracks.count)")
 
-        // Convert URIs to QueueEntries
-        func toQueueEntry(uri: String, provider: String) -> QueueEntry? {
-            guard let trackId = SpotifyAPI.parseTrackURI(uri) else { return nil }
-            return QueueEntry(trackId: trackId, provider: TrackProvider(from: provider))
+        // Convert track info to QueueEntry
+        func toQueueEntry(_ trackInfo: ContextTrackInfo) -> QueueEntry? {
+            guard let trackId = SpotifyAPI.parseTrackURI(trackInfo.uri) else { return nil }
+            return QueueEntry(trackId: trackId, provider: TrackProvider(from: trackInfo.provider))
         }
 
         // Current track
-        let currentEntry: QueueEntry? = if let uri = notification.currentTrackUri,
-                                           let provider = notification.currentTrackProvider
-        {
-            toQueueEntry(uri: uri, provider: provider)
-        } else {
-            nil
-        }
+        let currentEntry: QueueEntry? = notification.currentTrack.flatMap { toQueueEntry($0) }
 
-        // Next tracks (zip URIs with providers)
-        let nextEntries: [QueueEntry] = zip(notification.nextTrackUris, notification.nextTrackProviders)
-            .compactMap { toQueueEntry(uri: $0, provider: $1) }
+        // Next tracks
+        let nextEntries: [QueueEntry] = notification.nextTracks.compactMap { toQueueEntry($0) }
 
-        // Previous tracks (zip URIs with providers)
-        let prevEntries: [QueueEntry] = zip(notification.prevTrackUris, notification.prevTrackProviders)
-            .compactMap { toQueueEntry(uri: $0, provider: $1) }
+        // Previous tracks
+        let prevEntries: [QueueEntry] = notification.prevTracks.compactMap { toQueueEntry($0) }
 
         debugLog("QueueService", "Context resolved queue: prev=\(prevEntries.count), current=\(currentEntry != nil ? 1 : 0), next=\(nextEntries.count)")
 

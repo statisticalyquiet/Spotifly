@@ -178,6 +178,14 @@ typedef void (*AddedToQueueCallback)(const char* added_json);
 /// Called when a track is manually added to the queue (via add_to_queue).
 void spotifly_register_added_to_queue_callback(AddedToQueueCallback callback);
 
+/// Callback function type for set queue notifications.
+/// Receives a JSON string containing next_tracks and prev_tracks arrays with uri and provider.
+typedef void (*SetQueueCallback)(const char* set_queue_json);
+
+/// Registers a callback to receive set queue notifications.
+/// Called when the queue is set/modified (via set_queue command from mobile app).
+void spotifly_register_set_queue_callback(SetQueueCallback callback);
+
 /// Callback function type for connection state change notifications.
 /// Receives a JSON string containing full connection state.
 typedef void (*ConnectionStateCallback)(const char* state_json);
