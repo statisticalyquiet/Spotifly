@@ -319,17 +319,6 @@ struct LoggedInView: View {
 
         return Menu {
             Button {
-                Task {
-                    let token = await session.validAccessToken()
-                    await playbackViewModel.addToQueue(uri: artist.uri, accessToken: token)
-                }
-            } label: {
-                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-            }
-
-            Divider()
-
-            Button {
                 if let externalUrl = artist.externalUrl {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
