@@ -16,7 +16,6 @@ final class QueueService {
     private let store: AppStore
     private let tokenProvider: () async -> String
     private var queueSubscription: AnyCancellable?
-    private var addedToQueueSubscription: AnyCancellable?
     private var setQueueSubscription: AnyCancellable?
     private var metadataFetchTask: Task<Void, Never>?
     private var pendingTrackIds: Set<String> = []
@@ -26,7 +25,6 @@ final class QueueService {
         self.store = store
         self.tokenProvider = tokenProvider
         setupQueueSubscription()
-        setupAddedToQueueSubscription()
         setupSetQueueSubscription()
     }
 
@@ -40,32 +38,6 @@ final class QueueService {
             .sink { [weak self] queueState in
                 self?.handleQueueUpdate(queueState)
             }
-    }
-
-    /// Subscribe to added to queue events from Spirc
-    /// This fires when a track is manually added to the queue
-    private func setupAddedToQueueSubscription() {
-        addedToQueueSubscription = SpotifyPlayer.addedToQueue
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                self?.handleAddedToQueue(notification)
-            }
-    }
-
-    /// Handle added to queue notification (fires when track is manually queued)
-    private func handleAddedToQueue(_ notification: AddedToQueueNotification) {
-        guard let trackId = SpotifyAPI.parseTrackURI(notification.trackUri) else {
-            debugLog("QueueService", "Failed to parse track URI: \(notification.trackUri)")
-            return
-        }
-
-        debugLog("QueueService", "Track added to queue: \(trackId)")
-
-        // Insert the track into the queue after existing queue items, before context items
-        store.insertQueuedTrack(trackId: trackId)
-
-        // Fetch metadata for the track if not already in store
-        fetchTrackMetadata(for: [trackId])
     }
 
     /// Subscribe to set queue events from Spirc
