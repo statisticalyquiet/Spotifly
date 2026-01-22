@@ -111,24 +111,12 @@ struct SetQueueTrackInfo: Sendable {
     nonisolated let provider: String
 }
 
-/// Set queue notification containing the full queue state
+/// Set queue notification containing the full queue state with context info
 struct SetQueueNotification: Sendable {
+    nonisolated let contextUri: String
+    nonisolated let currentTrack: SetQueueTrackInfo?
     nonisolated let nextTracks: [SetQueueTrackInfo]
     nonisolated let prevTracks: [SetQueueTrackInfo]
-}
-
-/// Track info in a context loaded notification
-struct ContextTrackInfo: Sendable {
-    nonisolated let uri: String
-    nonisolated let provider: String
-}
-
-/// Context loaded notification containing track info when a context (playlist/album) is loaded
-struct ContextLoadedNotification: Sendable {
-    nonisolated let contextUri: String
-    nonisolated let currentTrack: ContextTrackInfo?
-    nonisolated let nextTracks: [ContextTrackInfo]
-    nonisolated let prevTracks: [ContextTrackInfo]
 }
 
 /// Session client changed notification containing info about the controlling Spotify client
@@ -162,9 +150,6 @@ private nonisolated(unsafe) let setQueueSubject = PassthroughSubject<SetQueueNot
 
 /// Global subject for connection state updates (nonisolated for C callback access)
 private nonisolated(unsafe) let connectionStateSubject = CurrentValueSubject<LibrespotConnectionState?, Never>(nil)
-
-/// Global subject for context loaded notifications (nonisolated for C callback access)
-private nonisolated(unsafe) let contextLoadedSubject = PassthroughSubject<ContextLoadedNotification, Never>()
 
 /// Global subject for session client changed notifications (nonisolated for C callback access)
 private nonisolated(unsafe) let sessionClientChangedSubject = PassthroughSubject<SessionClientChangedNotification, Never>()
@@ -363,7 +348,7 @@ private nonisolated func registerSetQueueCallback() {
 }
 
 /// C callback for set queue notifications from Rust
-/// Fires when the queue is set/modified (e.g., from mobile app)
+/// Fires when the queue is set/modified or a context is loaded
 private nonisolated func handleSetQueueCallback(_ jsonPtr: UnsafePointer<CChar>?) {
     guard let jsonPtr else {
         debugLog("SpotifyPlayer", "handleSetQueueCallback: jsonPtr is nil")
@@ -382,63 +367,13 @@ private nonisolated func handleSetQueueCallback(_ jsonPtr: UnsafePointer<CChar>?
             return
         }
 
-        // Parse next_tracks array
-        let nextTracksJson = json["next_tracks"] as? [[String: Any]] ?? []
-        let nextTracks = nextTracksJson.map { track in
-            SetQueueTrackInfo(
-                uri: track["uri"] as? String ?? "",
-                provider: track["provider"] as? String ?? "",
-            )
-        }
-
-        // Parse prev_tracks array
-        let prevTracksJson = json["prev_tracks"] as? [[String: Any]] ?? []
-        let prevTracks = prevTracksJson.map { track in
-            SetQueueTrackInfo(
-                uri: track["uri"] as? String ?? "",
-                provider: track["provider"] as? String ?? "",
-            )
-        }
-
-        let notification = SetQueueNotification(nextTracks: nextTracks, prevTracks: prevTracks)
-        setQueueSubject.send(notification)
-
-    } catch {
-        debugLog("SpotifyPlayer", "Failed to parse set queue JSON: \(error)")
-    }
-}
-
-/// Registers the context loaded callback with Rust (fires when a context is loaded)
-private nonisolated func registerContextLoadedCallback() {
-    spotifly_register_context_loaded_callback { jsonPtr in
-        handleContextLoadedCallback(jsonPtr)
-    }
-}
-
-/// C callback for context loaded notifications from Rust
-/// Fires immediately when a context (playlist, album, etc.) is loaded locally
-private nonisolated func handleContextLoadedCallback(_ jsonPtr: UnsafePointer<CChar>?) {
-    guard let jsonPtr else {
-        debugLog("SpotifyPlayer", "handleContextLoadedCallback: jsonPtr is nil")
-        return
-    }
-
-    let jsonString = String(cString: jsonPtr)
-    debugLog("SpotifyPlayer", "Context loaded callback: \(jsonString.prefix(200))...")
-
-    guard let data = jsonString.data(using: .utf8) else {
-        return
-    }
-
-    do {
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return
-        }
+        // Parse context_uri
+        let contextUri = json["context_uri"] as? String ?? ""
 
         // Parse current_track (optional object with uri and provider)
-        var currentTrack: ContextTrackInfo?
+        var currentTrack: SetQueueTrackInfo?
         if let currentTrackJson = json["current_track"] as? [String: Any] {
-            currentTrack = ContextTrackInfo(
+            currentTrack = SetQueueTrackInfo(
                 uri: currentTrackJson["uri"] as? String ?? "",
                 provider: currentTrackJson["provider"] as? String ?? "",
             )
@@ -447,7 +382,7 @@ private nonisolated func handleContextLoadedCallback(_ jsonPtr: UnsafePointer<CC
         // Parse next_tracks array
         let nextTracksJson = json["next_tracks"] as? [[String: Any]] ?? []
         let nextTracks = nextTracksJson.map { track in
-            ContextTrackInfo(
+            SetQueueTrackInfo(
                 uri: track["uri"] as? String ?? "",
                 provider: track["provider"] as? String ?? "",
             )
@@ -456,27 +391,22 @@ private nonisolated func handleContextLoadedCallback(_ jsonPtr: UnsafePointer<CC
         // Parse prev_tracks array
         let prevTracksJson = json["prev_tracks"] as? [[String: Any]] ?? []
         let prevTracks = prevTracksJson.map { track in
-            ContextTrackInfo(
+            SetQueueTrackInfo(
                 uri: track["uri"] as? String ?? "",
                 provider: track["provider"] as? String ?? "",
             )
         }
 
-        let notification = ContextLoadedNotification(
-            contextUri: json["context_uri"] as? String ?? "",
+        let notification = SetQueueNotification(
+            contextUri: contextUri,
             currentTrack: currentTrack,
             nextTracks: nextTracks,
             prevTracks: prevTracks,
         )
+        setQueueSubject.send(notification)
 
-        debugLog(
-            "SpotifyPlayer",
-            "Context loaded: \(notification.contextUri), next=\(notification.nextTracks.count), prev=\(notification.prevTracks.count)",
-        )
-
-        contextLoadedSubject.send(notification)
     } catch {
-        debugLog("SpotifyPlayer", "Failed to parse context loaded JSON: \(error)")
+        debugLog("SpotifyPlayer", "Failed to parse set queue JSON: \(error)")
     }
 }
 
@@ -739,7 +669,6 @@ enum SpotifyPlayer {
         registerSessionConnectedCallback()
         registerSessionClientChangedCallback()
         registerConnectionStateCallback()
-        registerContextLoadedCallback()
 
         // Sync playback settings from UserDefaults before initializing
         syncSettingsFromUserDefaults()
@@ -836,13 +765,6 @@ enum SpotifyPlayer {
     /// Subscribe to this to update the connection status dashboard.
     static var connectionState: AnyPublisher<LibrespotConnectionState?, Never> {
         connectionStateSubject.eraseToAnyPublisher()
-    }
-
-    /// Returns a publisher for context loaded notifications.
-    /// Fires immediately when a context (playlist, album, etc.) is loaded locally.
-    /// Contains the full list of track URIs in the context.
-    static var contextLoaded: AnyPublisher<ContextLoadedNotification, Never> {
-        contextLoadedSubject.eraseToAnyPublisher()
     }
 
     /// Returns the current connection state synchronously.
