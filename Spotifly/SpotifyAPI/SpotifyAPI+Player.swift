@@ -92,4 +92,174 @@ extension SpotifyAPI {
             try throwAPIError(data: data, statusCode: httpResponse.statusCode)
         }
     }
+
+    // MARK: - Remote Playback Control
+
+    /// Pauses playback on the active device via Web API.
+    /// Use this when controlling a remote device (not the local Spirc).
+    static func pausePlayback(accessToken: String) async throws {
+        let urlString = "\(baseURL)/me/player/pause"
+
+        #if DEBUG
+            debugLog("SpotifyAPI", "[PUT] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200, 204:
+            return // Success
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
+    /// Resumes playback on the active device via Web API.
+    /// Use this when controlling a remote device (not the local Spirc).
+    static func resumePlayback(accessToken: String) async throws {
+        let urlString = "\(baseURL)/me/player/play"
+
+        #if DEBUG
+            debugLog("SpotifyAPI", "[PUT] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200, 204:
+            return // Success
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
+    /// Skips to the next track on the active device via Web API.
+    /// Use this when controlling a remote device (not the local Spirc).
+    static func skipToNext(accessToken: String) async throws {
+        let urlString = "\(baseURL)/me/player/next"
+
+        #if DEBUG
+            debugLog("SpotifyAPI", "[POST] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200, 204:
+            return // Success
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
+    /// Skips to the previous track on the active device via Web API.
+    /// Use this when controlling a remote device (not the local Spirc).
+    static func skipToPrevious(accessToken: String) async throws {
+        let urlString = "\(baseURL)/me/player/previous"
+
+        #if DEBUG
+            debugLog("SpotifyAPI", "[POST] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200, 204:
+            return // Success
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
+    /// Seeks to a position in the currently playing track via Web API.
+    /// Use this when controlling a remote device (not the local Spirc).
+    /// - Parameters:
+    ///   - accessToken: The access token for authentication
+    ///   - positionMs: The position in milliseconds to seek to
+    static func seekToPosition(accessToken: String, positionMs: Int) async throws {
+        let urlString = "\(baseURL)/me/player/seek?position_ms=\(positionMs)"
+
+        #if DEBUG
+            debugLog("SpotifyAPI", "[PUT] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200, 204:
+            return // Success
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
 }

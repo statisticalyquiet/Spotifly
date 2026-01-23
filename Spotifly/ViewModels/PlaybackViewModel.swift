@@ -280,7 +280,11 @@ final class PlaybackViewModel {
     }
 
     func updatePlayingState() {
-        isPlaying = SpotifyPlayer.isPlaying
+        // Only sync from local Spirc when we're the active device
+        // Remote playback state comes from cluster updates
+        if SpotifyPlayer.isActiveDevice {
+            isPlaying = SpotifyPlayer.isPlaying
+        }
     }
 
     /// Sets the AppStore reference. Call this after AppStore is created.
@@ -288,56 +292,120 @@ final class PlaybackViewModel {
         self.store = store
     }
 
-    // MARK: - Playback Control (via Spirc)
+    // MARK: - Playback Control (via Spirc or Web API)
 
-    // All playback control uses local Spirc - state updates come back via Mercury callback
+    // Uses local Spirc when active device, Web API otherwise
+    // State updates come back via Mercury callback
 
     func next() {
-        do {
-            try SpotifyPlayer.next()
-            // Immediately reset position to 0 for responsive UI
-            positionAnchorMs = 0
-            positionAnchorTime = CACurrentMediaTime()
-            currentPositionMs = 0
-            updateNowPlayingInfo(forcePositionUpdate: true)
-        } catch {
-            errorMessage = error.localizedDescription
+        if SpotifyPlayer.isActiveDevice {
+            do {
+                try SpotifyPlayer.next()
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        } else {
+            // Remote control via Web API
+            Task {
+                guard let token = await tokenProvider?() else { return }
+                do {
+                    try await SpotifyAPI.skipToNext(accessToken: token)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
+        // Immediately reset position to 0 for responsive UI
+        positionAnchorMs = 0
+        positionAnchorTime = CACurrentMediaTime()
+        currentPositionMs = 0
+        updateNowPlayingInfo(forcePositionUpdate: true)
     }
 
     func previous() {
-        do {
-            try SpotifyPlayer.previous()
-            // Immediately reset position to 0 for responsive UI
-            positionAnchorMs = 0
-            positionAnchorTime = CACurrentMediaTime()
-            currentPositionMs = 0
-            updateNowPlayingInfo(forcePositionUpdate: true)
-        } catch {
-            errorMessage = error.localizedDescription
+        if SpotifyPlayer.isActiveDevice {
+            do {
+                try SpotifyPlayer.previous()
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        } else {
+            // Remote control via Web API
+            Task {
+                guard let token = await tokenProvider?() else { return }
+                do {
+                    try await SpotifyAPI.skipToPrevious(accessToken: token)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
+        // Immediately reset position to 0 for responsive UI
+        positionAnchorMs = 0
+        positionAnchorTime = CACurrentMediaTime()
+        currentPositionMs = 0
+        updateNowPlayingInfo(forcePositionUpdate: true)
     }
 
     func seek(to positionMs: UInt32) {
-        do {
-            try SpotifyPlayer.seek(positionMs: positionMs)
-            // Update anchor for smooth interpolation from new position
-            positionAnchorMs = positionMs
-            positionAnchorTime = CACurrentMediaTime()
-            currentPositionMs = positionMs
-            updateNowPlayingInfo(forcePositionUpdate: true)
-        } catch {
-            errorMessage = error.localizedDescription
+        if SpotifyPlayer.isActiveDevice {
+            do {
+                try SpotifyPlayer.seek(positionMs: positionMs)
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        } else {
+            // Remote control via Web API
+            Task {
+                guard let token = await tokenProvider?() else { return }
+                do {
+                    try await SpotifyAPI.seekToPosition(accessToken: token, positionMs: Int(positionMs))
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
+        // Update anchor for smooth interpolation from new position
+        positionAnchorMs = positionMs
+        positionAnchorTime = CACurrentMediaTime()
+        currentPositionMs = positionMs
+        updateNowPlayingInfo(forcePositionUpdate: true)
     }
 
     func pause() {
-        SpotifyPlayer.pause()
+        if SpotifyPlayer.isActiveDevice {
+            SpotifyPlayer.pause()
+        } else {
+            // Remote control via Web API
+            Task {
+                guard let token = await tokenProvider?() else { return }
+                do {
+                    try await SpotifyAPI.pausePlayback(accessToken: token)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
         // State update will come from Mercury callback
     }
 
     func resume() {
-        SpotifyPlayer.resume()
+        if SpotifyPlayer.isActiveDevice {
+            SpotifyPlayer.resume()
+        } else {
+            // Remote control via Web API
+            Task {
+                guard let token = await tokenProvider?() else { return }
+                do {
+                    try await SpotifyAPI.resumePlayback(accessToken: token)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
         // Don't call syncPositionAnchor() - Rust returns 0 immediately after resume
         // Keep the current positionAnchorMs (correct from paused state), just update the time
         positionAnchorTime = CACurrentMediaTime()
@@ -721,10 +789,15 @@ final class PlaybackViewModel {
         )
 
         // Update playing state
-        // Use SpotifyPlayer.isPlaying directly from Rust layer - more reliable than cluster state
-        // The cluster may report paused=true during active playback in some states
+        // When active device: use SpotifyPlayer.isPlaying (local Spirc state)
+        // When not active: use cluster state (remote device's actual state)
         let wasPlaying = isPlaying
-        let newIsPlaying = SpotifyPlayer.isPlaying
+        let newIsPlaying: Bool = if SpotifyPlayer.isActiveDevice {
+            SpotifyPlayer.isPlaying
+        } else {
+            // Remote device: use cluster state - playing means actively playing (not paused)
+            state.isPlaying && !state.isPaused
+        }
         isPlaying = newIsPlaying
 
         // Update track if changed
@@ -739,11 +812,26 @@ final class PlaybackViewModel {
         }
 
         // Sync position anchor on state changes
+        // When monitoring a remote device, position_ms is the position at timestamp_ms
+        // We need to account for elapsed time since that timestamp to get current position
         if state.positionMs >= 0 {
             let posMs = UInt32(state.positionMs)
-            debugLog("PlaybackViewModel", "Position anchor: \(positionAnchorMs) -> \(posMs)")
-            positionAnchorMs = posMs
-            positionAnchorTime = CACurrentMediaTime()
+            let now = CACurrentMediaTime()
+
+            // If we have a valid timestamp, adjust anchor time backwards by elapsed time
+            // This makes interpolation give the correct current position
+            if state.timestampMs > 0 {
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                let elapsedSinceTimestamp = max(0, nowMs - state.timestampMs)
+                let elapsedSeconds = Double(elapsedSinceTimestamp) / 1000.0
+                debugLog("PlaybackViewModel", "Position anchor: \(positionAnchorMs) -> \(posMs) (timestamp was \(elapsedSinceTimestamp)ms ago)")
+                positionAnchorMs = posMs
+                positionAnchorTime = now - elapsedSeconds
+            } else {
+                debugLog("PlaybackViewModel", "Position anchor: \(positionAnchorMs) -> \(posMs)")
+                positionAnchorMs = posMs
+                positionAnchorTime = now
+            }
             currentPositionMs = posMs
         }
 
@@ -812,29 +900,35 @@ final class PlaybackViewModel {
     private func checkDriftAndSync() {
         var didCorrectDrift = false
 
-        // Sync playing state with Rust
-        let rustIsPlaying = SpotifyPlayer.isPlaying
-        if rustIsPlaying != isPlaying {
-            isPlaying = rustIsPlaying
-            syncPositionAnchor()
-            didCorrectDrift = true
+        // Sync playing state with Rust - only when we're the active device
+        // When monitoring remote playback, state comes from cluster updates
+        if SpotifyPlayer.isActiveDevice {
+            let rustIsPlaying = SpotifyPlayer.isPlaying
+            if rustIsPlaying != isPlaying {
+                isPlaying = rustIsPlaying
+                syncPositionAnchor()
+                didCorrectDrift = true
+            }
         }
 
         // Update currentPositionMs for non-TimelineView consumers
         currentPositionMs = interpolatedPositionMs
 
-        // Check for significant drift from Rust position
-        let rustPosition = SpotifyPlayer.positionMs
-        if rustPosition != lastRustPosition {
-            let drift = abs(Int32(rustPosition) - Int32(interpolatedPositionMs))
-            if drift > 500 {
-                // More than 500ms drift - resync anchor
-                positionAnchorMs = rustPosition
-                positionAnchorTime = CACurrentMediaTime()
-                currentPositionMs = min(rustPosition, trackDurationMs)
-                didCorrectDrift = true
+        // Check for significant drift from Rust position - only when active device
+        // Remote playback position is interpolated from cluster timestamp, not real-time
+        if SpotifyPlayer.isActiveDevice {
+            let rustPosition = SpotifyPlayer.positionMs
+            if rustPosition != lastRustPosition {
+                let drift = abs(Int32(rustPosition) - Int32(interpolatedPositionMs))
+                if drift > 500 {
+                    // More than 500ms drift - resync anchor
+                    positionAnchorMs = rustPosition
+                    positionAnchorTime = CACurrentMediaTime()
+                    currentPositionMs = min(rustPosition, trackDurationMs)
+                    didCorrectDrift = true
+                }
+                lastRustPosition = rustPosition
             }
-            lastRustPosition = rustPosition
         }
 
         updateNowPlayingInfo(forcePositionUpdate: didCorrectDrift)

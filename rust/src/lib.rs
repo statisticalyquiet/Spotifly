@@ -134,6 +134,8 @@ struct PlaybackStateUpdate {
     shuffle: bool,
     repeat_track: bool,
     repeat_context: bool,
+    /// Timestamp (ms since epoch) when position_ms was recorded - for computing current position
+    timestamp_ms: i64,
 }
 
 #[derive(Serialize)]
@@ -746,22 +748,10 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 *last_error = None;
                             }
 
-                            // Check if we should skip transfer (soft reconnect mode)
-                            if SKIP_SESSION_CONNECTED_TRANSFER.swap(false, Ordering::SeqCst) {
-                                debug!("SessionConnected: skipping transfer(None) for soft reconnect - playback continues uninterrupted");
-                            } else {
-                                // Re-activate device on reconnect to trigger cluster state sync
-                                // This tells Spotify "I'm available again, send me the current state"
-                                let spirc_guard = SPIRC.lock().unwrap();
-                                if let Some(spirc) = spirc_guard.as_ref() {
-                                    if let Err(e) = spirc.transfer(None) {
-                                        debug!("transfer(None) on reconnect failed (non-fatal): {:?}", e);
-                                    } else {
-                                        debug!("transfer(None) on reconnect succeeded - awaiting cluster state");
-                                    }
-                                }
-                                drop(spirc_guard);
-                            }
+                            // Clear soft reconnect flag if set (no longer need to check)
+                            SKIP_SESSION_CONNECTED_TRANSFER.store(false, Ordering::SeqCst);
+                            // Don't call transfer(None) on reconnect - we stay passive
+                            // until user explicitly plays content locally
 
                             // Notify connection state change
                             notify_connection_state_change();
@@ -944,19 +934,13 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                 debug!("Soft reconnect: skipping transfer(None) to preserve current playback");
                 // Clear soft reconnect mode now that we're reconnected
                 SOFT_RECONNECT_MODE.store(false, Ordering::SeqCst);
-            } else {
-                // Activate this device in Spotify Connect by calling transfer(None)
-                // This makes us the active device so load() commands work immediately
-                // We do this at init time, not at play time, to avoid delays when playing
-                debug!("Activating device with transfer(None)");
-                if let Some(spirc) = spirc_guard.as_ref() {
-                    if let Err(_e) = spirc.transfer(None) {
-                        debug!("Initial transfer failed (non-fatal, device may have no previous state): {:?}", _e);
-                    }
-                }
             }
+            // Don't call transfer(None) or set IS_ACTIVE_DEVICE on init
+            // We become active only when user explicitly plays content locally
             drop(spirc_guard);
-            IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+
+            // Notify Swift that we're connected (Spirc is ready)
+            notify_connection_state_change();
         }
         Err(_e) => {
             // Spirc failed - fall back to manual session connection for basic playback
@@ -1059,14 +1043,16 @@ fn send_playback_state(player_state: &PlayerState) {
             shuffle,
             repeat_track,
             repeat_context,
+            timestamp_ms: player_state.timestamp,
         };
 
         debug!(
-            "PlaybackState: playing={}, paused={}, position={}ms, duration={}ms, shuffle={}, repeat_track={}, repeat_context={}",
+            "PlaybackState: playing={}, paused={}, position={}ms, duration={}ms, timestamp={}ms, shuffle={}, repeat_track={}, repeat_context={}",
             update.is_playing,
             update.is_paused,
             update.position_ms,
             update.duration_ms,
+            update.timestamp_ms,
             update.shuffle,
             update.repeat_track,
             update.repeat_context
@@ -1255,6 +1241,7 @@ pub extern "C" fn spotifly_play_tracks(track_uris_json: *const c_char) -> i32 {
             match spirc.load(load_request) {
                 Ok(_) => {
                     debug!("Spirc.load(tracks) succeeded");
+                    IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
                     0
                 }
                 Err(_e) => {
@@ -1330,6 +1317,7 @@ pub extern "C" fn spotifly_play_uri(uri_or_url: *const c_char) -> i32 {
                 Ok(_) => {
                     debug!("Spirc.load() succeeded");
                     IS_PLAYING.store(true, Ordering::SeqCst);
+                    IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
                     0
                 }
                 Err(_e) => {
@@ -1565,6 +1553,17 @@ pub extern "C" fn spotifly_soft_cleanup() {
 #[no_mangle]
 pub extern "C" fn spotifly_is_playing() -> i32 {
     if IS_PLAYING.load(Ordering::SeqCst) {
+        1
+    } else {
+        0
+    }
+}
+
+/// Returns 1 if this device is the active Spotify Connect device, 0 otherwise.
+/// When not active, playback controls should use Web API instead of Spirc.
+#[no_mangle]
+pub extern "C" fn spotifly_is_active_device() -> i32 {
+    if IS_ACTIVE_DEVICE.load(Ordering::SeqCst) {
         1
     } else {
         0

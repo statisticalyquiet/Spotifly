@@ -75,6 +75,8 @@ struct PlaybackState: Sendable, Equatable {
     nonisolated let shuffle: Bool
     nonisolated let repeatTrack: Bool
     nonisolated let repeatContext: Bool
+    /// Timestamp (ms since epoch) when positionMs was recorded - for computing current position
+    nonisolated let timestampMs: Int64
 }
 
 /// Global subject for queue updates (nonisolated for C callback access)
@@ -478,6 +480,7 @@ private nonisolated func handlePlaybackStateCallback(_ jsonPtr: UnsafePointer<CC
             shuffle: json["shuffle"] as? Bool ?? false,
             repeatTrack: json["repeat_track"] as? Bool ?? false,
             repeatContext: json["repeat_context"] as? Bool ?? false,
+            timestampMs: (json["timestamp_ms"] as? NSNumber)?.int64Value ?? 0,
         )
 
         debugLog("SpotifyPlayer", "PlaybackState: playing=\(state.isPlaying), paused=\(state.isPaused), pos=\(state.positionMs)ms, dur=\(state.durationMs)ms, shuffle=\(state.shuffle), repeatTrack=\(state.repeatTrack), repeatContext=\(state.repeatContext)")
@@ -850,6 +853,12 @@ enum SpotifyPlayer {
     /// Returns whether Spirc is initialized and connected to Spotify Connect.
     static var isSpircReady: Bool {
         spotifly_is_spirc_ready() == 1
+    }
+
+    /// Returns whether this device is the active Spotify Connect device.
+    /// When false, playback controls should use Web API instead of Spirc.
+    static var isActiveDevice: Bool {
+        spotifly_is_active_device() == 1
     }
 
     /// Returns the current playback position in milliseconds.

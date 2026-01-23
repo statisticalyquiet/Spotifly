@@ -79,6 +79,10 @@ void spotifly_soft_cleanup(void);
 /// Returns 1 if currently playing, 0 otherwise.
 int32_t spotifly_is_playing(void);
 
+/// Returns 1 if this device is the active Spotify Connect device, 0 otherwise.
+/// When not active, playback controls should use Web API instead of Spirc.
+int32_t spotifly_is_active_device(void);
+
 /// Returns 1 if Spirc is initialized and connected, 0 otherwise.
 int32_t spotifly_is_spirc_ready(void);
 
