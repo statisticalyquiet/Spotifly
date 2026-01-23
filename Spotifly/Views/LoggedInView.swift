@@ -290,6 +290,14 @@ struct LoggedInView: View {
             }
             .disabled(album.externalUrl == nil)
 
+            if let artistId = album.artistId {
+                Button {
+                    navigationCoordinator.push(.artist(id: artistId))
+                } label: {
+                    Label("Go to Artist", systemImage: "person")
+                }
+            }
+
             Divider()
 
             if isInLibrary {
