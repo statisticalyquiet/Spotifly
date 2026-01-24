@@ -157,8 +157,7 @@ final class PlaybackViewModel {
             }
 
             // Note: We don't auto-transfer on init anymore.
-            // When the user plays something, spirc.load() automatically makes this device active.
-            // transferToLocal() is only used for explicit "Transfer playback here" action.
+            // When the user plays something, the Rust layer auto-activates via transfer before load.
             _ = spircReady // Acknowledge we waited for Spirc to be ready
         } catch {
             errorMessage = error.localizedDescription

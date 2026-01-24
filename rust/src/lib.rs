@@ -1186,6 +1186,25 @@ fn process_and_send_queue(player_state: PlayerState) {
     }
 }
 
+/// Helper to ensure the device is active before loading content.
+/// If not active, transfers playback to this device first (which activates it).
+/// Returns Ok(()) if ready to load, Err(i32) with error code if activation failed.
+fn ensure_active_for_playback(spirc: &Arc<Spirc>) -> Result<(), i32> {
+    if !IS_ACTIVE_DEVICE.load(Ordering::SeqCst) {
+        debug!("Device not active, activating via transfer before load");
+        match spirc.transfer(None) {
+            Ok(_) => {
+                debug!("Transfer (activate) succeeded");
+            }
+            Err(_e) => {
+                debug!("Transfer (activate) failed: {:?}", _e);
+                return Err(-1);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Plays multiple tracks in sequence.
 /// Returns 0 on success, -1 on error.
 ///
@@ -1230,6 +1249,11 @@ pub extern "C" fn spotifly_play_tracks(track_uris_json: *const c_char) -> i32 {
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => {
+            // Ensure device is active before loading
+            if let Err(e) = ensure_active_for_playback(spirc) {
+                return e;
+            }
+
             let load_request = LoadRequest::from_tracks(
                 track_uris,
                 LoadRequestOptions {
@@ -1289,6 +1313,11 @@ pub extern "C" fn spotifly_play_uri(uri_or_url: *const c_char) -> i32 {
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => {
+            // Ensure device is active before loading
+            if let Err(e) = ensure_active_for_playback(spirc) {
+                return e;
+            }
+
             // Create LoadRequest - use from_context_uri for albums/playlists/artists,
             // from_tracks for single tracks
             let load_request = if uri_str.starts_with("spotify:track:") {
@@ -1754,6 +1783,11 @@ pub extern "C" fn spotifly_play_radio(track_uri: *const c_char) -> i32 {
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => {
+            // Ensure device is active before loading
+            if let Err(e) = ensure_active_for_playback(spirc) {
+                return e;
+            }
+
             let load_request = LoadRequest::from_context_uri(
                 playlist_uri,
                 LoadRequestOptions {
@@ -1763,7 +1797,10 @@ pub extern "C" fn spotifly_play_radio(track_uri: *const c_char) -> i32 {
                 },
             );
             match spirc.load(load_request) {
-                Ok(_) => 0,
+                Ok(_) => {
+                    IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                    0
+                }
                 Err(_e) => {
                     debug!("Play radio error: {:?}", _e);
                     -1
