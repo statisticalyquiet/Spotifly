@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - App now fetches initial playback state from Web API when Spirc connects, so remote device playback (queue, position, track) shows immediately instead of requiring a state change
+- Transfer from phone to Spotifly now works correctly - added transfer protection to auto-resume playback when Spotify Connect sends a spurious pause command immediately after load
+- Playback state (play/pause) now updates correctly in the UI when controlled locally - player events now send state updates to Swift
 
 ### Removed
 - Obsolete 500ms seek delay hack for transfer to local - native transfer preserves position seamlessly

@@ -83,6 +83,12 @@ static SESSION_CONNECTION_STATE: Lazy<Mutex<SessionConnectionState>> =
 static POSITION_MS: AtomicU32 = AtomicU32::new(0);
 static POSITION_TIMESTAMP_MS: AtomicU64 = AtomicU64::new(0);
 
+// Current track duration (ms) - updated from TrackChanged event
+static CURRENT_DURATION_MS: AtomicU32 = AtomicU32::new(0);
+
+// Transfer protection: timestamp when loading started (for auto-resume after transfer-triggered pause)
+static LOADING_STARTED_MS: AtomicU64 = AtomicU64::new(0);
+
 // Current track URI - for detecting same-track reconnects
 static CURRENT_TRACK_URI: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 // Flag to indicate soft reconnect mode (Player kept alive)
@@ -579,14 +585,55 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                 event = event_channel.recv() => {
                     match event {
                         Some(PlayerEvent::Playing { position_ms, .. }) => {
+                            debug!("PlayerEvent::Playing at {}ms", position_ms);
                             IS_PLAYING.store(true, Ordering::SeqCst);
                             IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                            // Clear transfer protection timestamp - track is playing
+                            LOADING_STARTED_MS.store(0, Ordering::SeqCst);
                             update_position(position_ms);
+                            // Send playback state update to Swift
+                            send_local_playback_state(true, position_ms);
                         }
                         Some(PlayerEvent::Paused { position_ms, .. }) => {
-                            IS_PLAYING.store(false, Ordering::SeqCst);
-                            // Still active when paused - just not playing
-                            update_position(position_ms);
+                            debug!("PlayerEvent::Paused at {}ms", position_ms);
+
+                            // Transfer protection: check if pause arrived within 500ms of loading
+                            // This handles the race condition where Spotify Connect sends Load
+                            // followed immediately by Pause during device transfers
+                            let loading_started = LOADING_STARTED_MS.load(Ordering::SeqCst);
+                            let now = current_timestamp_ms();
+                            let time_since_loading = now.saturating_sub(loading_started);
+
+                            let mut auto_resumed = false;
+                            if loading_started > 0 && time_since_loading < 500 {
+                                debug!(
+                                    "Transfer protection: pause received {}ms after loading, auto-resuming",
+                                    time_since_loading
+                                );
+                                // Clear the loading timestamp to prevent repeated auto-resumes
+                                LOADING_STARTED_MS.store(0, Ordering::SeqCst);
+
+                                // Auto-resume by calling spirc.play()
+                                let spirc_guard = SPIRC.lock().unwrap();
+                                if let Some(spirc) = spirc_guard.as_ref() {
+                                    if let Err(e) = spirc.play() {
+                                        debug!("Transfer protection auto-resume failed: {:?}", e);
+                                    } else {
+                                        debug!("Transfer protection: auto-resume initiated");
+                                        auto_resumed = true;
+                                    }
+                                }
+                            }
+
+                            // Only update state if we didn't auto-resume
+                            // (the Playing event will handle state update)
+                            if !auto_resumed {
+                                IS_PLAYING.store(false, Ordering::SeqCst);
+                                // Still active when paused - just not playing
+                                update_position(position_ms);
+                                // Send playback state update to Swift
+                                send_local_playback_state(false, position_ms);
+                            }
                         }
                         Some(PlayerEvent::PositionChanged { position_ms, .. }) => {
                             // Periodic position update (every 200ms)
@@ -613,13 +660,15 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                         Some(PlayerEvent::TrackChanged { audio_item }) => {
                             // Extract track URI from audio_item (same as Loading event)
                             let track_uri_str = audio_item.track_id.to_string();
-                            debug!("TrackChanged event: {} - triggering callbacks", track_uri_str);
+                            let duration_ms = audio_item.duration_ms;
+                            debug!("TrackChanged event: {} ({}ms) - triggering callbacks", track_uri_str, duration_ms);
 
-                            // Update current track URI
+                            // Update current track URI and duration
                             {
                                 let mut uri_guard = CURRENT_TRACK_URI.lock().unwrap();
                                 *uri_guard = Some(track_uri_str.clone());
                             }
+                            CURRENT_DURATION_MS.store(duration_ms, Ordering::SeqCst);
 
                             // Emit Loading callback with track info (position 0 for auto-advance)
                             let cb_guard = LOADING_CALLBACK.lock().unwrap();
@@ -656,6 +705,10 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 let mut uri_guard = CURRENT_TRACK_URI.lock().unwrap();
                                 *uri_guard = Some(track_uri_str.clone());
                             }
+
+                            // Record loading timestamp for transfer protection
+                            // (auto-resume if pause arrives within short window after loading)
+                            LOADING_STARTED_MS.store(current_timestamp_ms(), Ordering::SeqCst);
 
                             let cb_guard = LOADING_CALLBACK.lock().unwrap();
                             if let Some(callback) = *cb_guard {
@@ -1071,6 +1124,56 @@ fn send_playback_state(player_state: &PlayerState) {
         }
     } else {
         debug!("No playback state callback registered, skipping update");
+    }
+}
+
+/// Send playback state update from local player events (Playing, Paused)
+/// This is used when Spotifly is the active device - state changes happen locally
+/// and don't come through Mercury cluster updates.
+fn send_local_playback_state(is_playing: bool, position_ms: u32) {
+    debug!("send_local_playback_state called: is_playing={}, position_ms={}", is_playing, position_ms);
+
+    let cb_guard = PLAYBACK_STATE_CALLBACK.lock().unwrap();
+    if let Some(callback) = *cb_guard {
+        let cb = callback;
+        drop(cb_guard);
+
+        // Get track URI from local state
+        let track_uri = CURRENT_TRACK_URI
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_default();
+
+        // Get duration from local state
+        let duration_ms = CURRENT_DURATION_MS.load(Ordering::SeqCst);
+
+        let timestamp_ms = current_timestamp_ms() as i64;
+
+        let update = PlaybackStateUpdate {
+            is_playing,
+            is_paused: !is_playing,
+            track_uri,
+            position_ms: position_ms as i64,
+            duration_ms: duration_ms as i64,
+            shuffle: false, // TODO: track shuffle state locally if needed
+            repeat_track: false,
+            repeat_context: false,
+            timestamp_ms,
+        };
+
+        debug!(
+            "Local PlaybackState: playing={}, paused={}, position={}ms, duration={}ms",
+            update.is_playing,
+            update.is_paused,
+            update.position_ms,
+            update.duration_ms
+        );
+
+        if let Ok(json) = serde_json::to_string(&update) {
+            let c_str = CString::new(json).unwrap();
+            cb(c_str.as_ptr());
+        }
     }
 }
 
