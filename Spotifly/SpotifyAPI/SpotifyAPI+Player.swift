@@ -262,4 +262,62 @@ extension SpotifyAPI {
             try throwAPIError(data: data, statusCode: httpResponse.statusCode)
         }
     }
+
+    // MARK: - Playback State
+
+    /// Response from GET /me/player
+    struct PlaybackStateResponse: Decodable {
+        let device: DeviceCodable?
+        let repeatState: String?
+        let shuffleState: Bool?
+        let timestamp: Int64?
+        let progressMs: Int?
+        let isPlaying: Bool
+        let item: TrackCodable?
+
+        enum CodingKeys: String, CodingKey {
+            case device
+            case repeatState = "repeat_state"
+            case shuffleState = "shuffle_state"
+            case timestamp
+            case progressMs = "progress_ms"
+            case isPlaying = "is_playing"
+            case item
+        }
+    }
+
+    /// Fetches the current playback state from Spotify Web API.
+    /// Returns the currently playing track, device, and playback position.
+    /// - Parameter accessToken: The access token for authentication
+    /// - Returns: PlaybackStateResponse containing current playback state, or nil if nothing playing
+    static func fetchPlaybackState(accessToken: String) async throws -> PlaybackStateResponse? {
+        let urlString = "\(baseURL)/me/player"
+
+        debugLog("SpotifyAPI", "[GET] \(urlString)")
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200:
+            return try JSONDecoder().decode(PlaybackStateResponse.self, from: data)
+        case 204:
+            // No content - nothing playing
+            return nil
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
 }

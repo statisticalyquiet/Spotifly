@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Repeat track support via `Spirc.repeat_track()` - repeat single track with Connect state sync
 - Web API method `SpotifyAPI.addToQueue()` for adding tracks to queue with Connect sync
 
+### Fixed
+- App now fetches initial playback state from Web API when Spirc connects, so remote device playback (queue, position, track) shows immediately instead of requiring a state change
+
 ### Removed
 - Obsolete 500ms seek delay hack for transfer to local - native transfer preserves position seamlessly
 - Obsolete Web API transfer functions (`SpotifyAPI.transferPlayback()`, `SpotifyAPI.startPlayback()`) - replaced by native librespot calls

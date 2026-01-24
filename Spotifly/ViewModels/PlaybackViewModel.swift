@@ -840,6 +840,56 @@ final class PlaybackViewModel {
         }
     }
 
+    /// Apply playback state from Web API (used for initial sync when Spirc connects).
+    /// This populates the UI with the current playback state from any active device.
+    func applyWebAPIPlaybackState(
+        isPlaying: Bool,
+        progressMs: Int,
+        durationMs: Int,
+        trackUri: String?,
+        timestampMs: Int64,
+    ) {
+        debugLog(
+            "PlaybackViewModel",
+            "Applying Web API state: playing=\(isPlaying), progress=\(progressMs)ms, duration=\(durationMs)ms, uri=\(trackUri ?? "nil")",
+        )
+
+        // Update playing state
+        self.isPlaying = isPlaying
+
+        // Update track if provided
+        if let uri = trackUri, !uri.isEmpty {
+            currentTrackUri = uri
+        }
+
+        // Update duration
+        if durationMs > 0 {
+            trackDurationMs = UInt32(durationMs)
+        }
+
+        // Set position anchor accounting for elapsed time since the API timestamp
+        if progressMs >= 0 {
+            let posMs = UInt32(progressMs)
+            let now = CACurrentMediaTime()
+
+            if timestampMs > 0 {
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                let elapsedSinceTimestamp = max(0, nowMs - timestampMs)
+                let elapsedSeconds = Double(elapsedSinceTimestamp) / 1000.0
+                debugLog("PlaybackViewModel", "Web API position anchor: \(posMs)ms (timestamp was \(elapsedSinceTimestamp)ms ago)")
+                positionAnchorMs = posMs
+                positionAnchorTime = now - elapsedSeconds
+            } else {
+                positionAnchorMs = posMs
+                positionAnchorTime = now
+            }
+            currentPositionMs = posMs
+        }
+
+        // Update Now Playing info
+        updateNowPlayingInfo()
+    }
+
     // MARK: - Position Tracking
 
     // Anchor-based position tracking using CACurrentMediaTime for precision

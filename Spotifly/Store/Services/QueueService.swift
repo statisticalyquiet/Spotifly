@@ -198,6 +198,10 @@ final class QueueService {
                 // Store tracks in the global cache
                 store.upsertTracks(tracksToStore)
 
+                // Log each track's duration for debugging
+                for track in tracksToStore {
+                    debugLog("QueueService", "Cached track '\(track.name)' (\(track.id)): duration=\(track.durationMs)ms")
+                }
                 debugLog("QueueService", "Cached \(tracksToStore.count) tracks in store")
 
                 // Update queue items from store
@@ -220,6 +224,74 @@ final class QueueService {
         let nextCount = store.nextTrackEntities.count
         let total = prevCount + (store.currentTrackEntity != nil ? 1 : 0) + nextCount
         debugLog("QueueService", "Queue tracks resolved: \(total) with metadata (prev=\(prevCount), next=\(nextCount))")
+    }
+
+    // MARK: - Initial State Fetch
+
+    /// Fetches initial playback state and queue from Web API.
+    /// Called after Spirc becomes ready to sync with whatever device is currently playing.
+    /// Mercury only receives push updates, so we need this to get the current state.
+    func fetchInitialPlaybackState(accessToken: String) async {
+        debugLog("QueueService", "Fetching initial playback state from Web API...")
+
+        // Fetch playback state and queue in parallel
+        async let playbackStateTask = SpotifyAPI.fetchPlaybackState(accessToken: accessToken)
+        async let queueTask = SpotifyAPI.fetchQueue(accessToken: accessToken)
+
+        do {
+            let (playbackState, queueResponse) = try await (playbackStateTask, queueTask)
+
+            // Process queue response
+            let currentEntry: QueueEntry? = queueResponse.currentlyPlaying.flatMap { track in
+                QueueEntry(trackId: track.id, provider: .context)
+            }
+            let nextEntries: [QueueEntry] = queueResponse.queue.map { track in
+                QueueEntry(trackId: track.id, provider: .context)
+            }
+
+            // Web API doesn't provide previous tracks, so preserve existing or use empty
+            store.setQueue(previous: nil, current: currentEntry, next: nextEntries)
+
+            debugLog("QueueService", "Initial queue: current=\(currentEntry != nil ? 1 : 0), next=\(nextEntries.count)")
+
+            // Fetch track metadata
+            var allIds = (currentEntry.map { [$0.trackId] } ?? []) + nextEntries.map(\.trackId)
+
+            // Also add the track from playback state if different (shouldn't be, but just in case)
+            if let playbackTrack = playbackState?.item, !allIds.contains(playbackTrack.id) {
+                allIds.append(playbackTrack.id)
+            }
+
+            fetchTrackMetadata(for: allIds)
+
+            // Process playback state if available
+            if let state = playbackState {
+                // Get duration from playback state, or fall back to queue's currently playing track
+                let playbackStateDuration = state.item?.durationMs
+                let queueDuration = queueResponse.currentlyPlaying?.durationMs
+                let durationMs = playbackStateDuration ?? queueDuration ?? 0
+
+                debugLog(
+                    "QueueService",
+                    "Initial playback: playing=\(state.isPlaying), progress=\(state.progressMs ?? 0)ms, " +
+                        "duration from /me/player: \(playbackStateDuration.map { String($0) } ?? "nil"), " +
+                        "duration from /me/player/queue: \(queueDuration.map { String($0) } ?? "nil"), " +
+                        "using duration: \(durationMs)ms, device=\(state.device?.name ?? "unknown")",
+                )
+
+                // Update PlaybackViewModel with the current state
+                let vm = PlaybackViewModel.shared
+                vm.applyWebAPIPlaybackState(
+                    isPlaying: state.isPlaying,
+                    progressMs: state.progressMs ?? 0,
+                    durationMs: durationMs,
+                    trackUri: state.item?.uri ?? queueResponse.currentlyPlaying?.uri,
+                    timestampMs: state.timestamp ?? 0,
+                )
+            }
+        } catch {
+            debugLog("QueueService", "Failed to fetch initial playback state: \(error)")
+        }
     }
 
     // MARK: - Favorites Loading

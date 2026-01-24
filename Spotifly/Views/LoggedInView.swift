@@ -145,6 +145,10 @@ struct LoggedInView: View {
 
             // Initialize player/Spirc so Spotifly appears as a Connect device
             await playbackViewModel.initializeIfNeeded(accessToken: token)
+
+            // Fetch initial playback state from Web API (Mercury only receives push updates,
+            // so we need this to sync with whatever device is currently playing)
+            await queueService.fetchInitialPlaybackState(accessToken: token)
         }
         .onChange(of: navigationCoordinator.pendingNavigationItem) { _, newValue in
             if let pendingItem = newValue {
