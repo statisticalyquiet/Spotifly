@@ -296,6 +296,30 @@ final class AppStore {
         }
     }
 
+    /// Optimistically set a device as active (for immediate UI feedback during transfer)
+    /// Creates new Device instances with updated isActive values
+    func setActiveDevice(_ deviceId: String) {
+        var updatedDevices: [String: Device] = [:]
+        for (id, device) in devices {
+            let isActive = id == deviceId
+            if device.isActive != isActive {
+                // Create new Device with updated isActive
+                updatedDevices[id] = Device(
+                    id: device.id,
+                    name: device.name,
+                    type: device.type,
+                    isActive: isActive,
+                    isPrivateSession: device.isPrivateSession,
+                    isRestricted: device.isRestricted,
+                    volumePercent: device.volumePercent
+                )
+            } else {
+                updatedDevices[id] = device
+            }
+        }
+        devices = updatedDevices
+    }
+
     // MARK: - User Library Mutations
 
     /// Set user's playlist IDs (replaces existing)

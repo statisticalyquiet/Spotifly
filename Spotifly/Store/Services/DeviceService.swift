@@ -48,14 +48,23 @@ final class DeviceService {
     /// Uses native Spotify Connect protocol for seamless handoff.
     /// Returns true if transfer succeeded (caller should activate Connect mode)
     func transferPlayback(to device: Device, accessToken: String) async -> Bool {
+        // Optimistically mark the target device as active for immediate UI feedback
+        store.setActiveDevice(device.id)
+
         do {
             try SpotifyPlayer.transferPlayback(to: device.id)
 
-            // Reload devices to update active state
-            await loadDevices(accessToken: accessToken)
+            // Schedule a delayed refresh to confirm the state
+            // (Web API returns stale data immediately after transfer)
+            Task {
+                try? await Task.sleep(for: .milliseconds(750))
+                await loadDevices(accessToken: accessToken)
+            }
 
             return true
         } catch {
+            // Revert optimistic update on failure by refreshing from API
+            await loadDevices(accessToken: accessToken)
             store.devicesErrorMessage = String(localized: "speakers.error.failed_to_transfer")
             return false
         }

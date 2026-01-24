@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
 // MARK: - LoggedInView
@@ -149,6 +150,16 @@ struct LoggedInView: View {
             // Fetch initial playback state from Web API (Mercury only receives push updates,
             // so we need this to sync with whatever device is currently playing)
             await queueService.fetchInitialPlaybackState(accessToken: token)
+        }
+        .onReceive(SpotifyPlayer.sessionConnected) {
+            // Refresh playback state and devices after session reconnects
+            // This handles the case where we transferred playback to another device,
+            // the session disconnected, and now we've reconnected
+            Task {
+                let token = await session.validAccessToken()
+                await queueService.fetchInitialPlaybackState(accessToken: token)
+                await deviceService.loadDevices(accessToken: token)
+            }
         }
         .onChange(of: navigationCoordinator.pendingNavigationItem) { _, newValue in
             if let pendingItem = newValue {
