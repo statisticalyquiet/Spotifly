@@ -78,9 +78,6 @@ final class PlaybackViewModel {
         }
     }
 
-    // Favorite status of currently playing track
-    var isCurrentTrackFavorited = false
-
     private var isInitialized = false
     private var lastAlbumArtURL: String?
     private var playbackStateSubscription: AnyCancellable?
@@ -985,39 +982,37 @@ final class PlaybackViewModel {
 
     // MARK: - Favorite Management
 
-    func checkCurrentTrackFavoriteStatus(accessToken: String) async {
-        guard let uri = currentTrackUri, let trackId = SpotifyAPI.parseTrackURI(uri) else {
-            isCurrentTrackFavorited = false
-            return
-        }
-
-        do {
-            isCurrentTrackFavorited = try await SpotifyAPI.checkSavedTrack(
-                accessToken: accessToken,
-                trackId: trackId,
-            )
-        } catch {
-            #if DEBUG
-                print("Error checking favorite status: \(error)")
-            #endif
-            isCurrentTrackFavorited = false
-        }
-    }
-
+    /// Toggle favorite status for the current track (optimistic update via AppStore)
     func toggleCurrentTrackFavorite(accessToken: String) async {
-        guard let uri = currentTrackUri, let trackId = SpotifyAPI.parseTrackURI(uri) else {
+        guard let uri = currentTrackUri,
+              let trackId = SpotifyAPI.parseTrackURI(uri),
+              let store
+        else {
             return
         }
 
+        let wasOriginallyFavorite = store.isFavorite(trackId)
+
+        // Optimistic update - immediately update UI
+        if wasOriginallyFavorite {
+            store.removeTrackFromFavorites(trackId)
+        } else {
+            store.addTrackToFavorites(trackId)
+        }
+
         do {
-            if isCurrentTrackFavorited {
+            if wasOriginallyFavorite {
                 try await SpotifyAPI.removeSavedTrack(accessToken: accessToken, trackId: trackId)
-                isCurrentTrackFavorited = false
             } else {
                 try await SpotifyAPI.saveTrack(accessToken: accessToken, trackId: trackId)
-                isCurrentTrackFavorited = true
             }
         } catch {
+            // Rollback on failure
+            if wasOriginallyFavorite {
+                store.addTrackToFavorites(trackId)
+            } else {
+                store.removeTrackFromFavorites(trackId)
+            }
             errorMessage = error.localizedDescription
         }
     }
