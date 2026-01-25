@@ -95,9 +95,6 @@ static POSITION_TIMESTAMP_MS: AtomicU64 = AtomicU64::new(0);
 // Current track duration (ms) - updated from TrackChanged event
 static CURRENT_DURATION_MS: AtomicU32 = AtomicU32::new(0);
 
-// Transfer protection: timestamp when loading started (for auto-resume after transfer-triggered pause)
-static LOADING_STARTED_MS: AtomicU64 = AtomicU64::new(0);
-
 // Current track URI - for detecting same-track reconnects
 static CURRENT_TRACK_URI: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 // Flag to indicate soft reconnect mode (Player kept alive)
@@ -792,52 +789,17 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                             debug!("PlayerEvent::Playing at {}ms", position_ms);
                             IS_PLAYING.store(true, Ordering::SeqCst);
                             IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
-                            // Clear transfer protection timestamp - track is playing
-                            LOADING_STARTED_MS.store(0, Ordering::SeqCst);
                             update_position(position_ms);
                             // Send playback state update to Swift
                             send_local_playback_state(true, position_ms);
                         }
                         Some(PlayerEvent::Paused { position_ms, .. }) => {
                             debug!("PlayerEvent::Paused at {}ms", position_ms);
-
-                            // Transfer protection: check if pause arrived within 500ms of loading
-                            // This handles the race condition where Spotify Connect sends Load
-                            // followed immediately by Pause during device transfers
-                            let loading_started = LOADING_STARTED_MS.load(Ordering::SeqCst);
-                            let now = current_timestamp_ms();
-                            let time_since_loading = now.saturating_sub(loading_started);
-
-                            let mut auto_resumed = false;
-                            if loading_started > 0 && time_since_loading < 500 {
-                                debug!(
-                                    "Transfer protection: pause received {}ms after loading, auto-resuming",
-                                    time_since_loading
-                                );
-                                // Clear the loading timestamp to prevent repeated auto-resumes
-                                LOADING_STARTED_MS.store(0, Ordering::SeqCst);
-
-                                // Auto-resume by calling spirc.play()
-                                let spirc_guard = SPIRC.lock().unwrap();
-                                if let Some(spirc) = spirc_guard.as_ref() {
-                                    if let Err(e) = spirc.play() {
-                                        debug!("Transfer protection auto-resume failed: {:?}", e);
-                                    } else {
-                                        debug!("Transfer protection: auto-resume initiated");
-                                        auto_resumed = true;
-                                    }
-                                }
-                            }
-
-                            // Only update state if we didn't auto-resume
-                            // (the Playing event will handle state update)
-                            if !auto_resumed {
-                                IS_PLAYING.store(false, Ordering::SeqCst);
-                                // Still active when paused - just not playing
-                                update_position(position_ms);
-                                // Send playback state update to Swift
-                                send_local_playback_state(false, position_ms);
-                            }
+                            IS_PLAYING.store(false, Ordering::SeqCst);
+                            // Still active when paused - just not playing
+                            update_position(position_ms);
+                            // Send playback state update to Swift
+                            send_local_playback_state(false, position_ms);
                         }
                         Some(PlayerEvent::PositionChanged { position_ms, .. }) => {
                             // Periodic position update (every 200ms)
@@ -909,10 +871,6 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 let mut uri_guard = CURRENT_TRACK_URI.lock().unwrap();
                                 *uri_guard = Some(track_uri_str.clone());
                             }
-
-                            // Record loading timestamp for transfer protection
-                            // (auto-resume if pause arrives within short window after loading)
-                            LOADING_STARTED_MS.store(current_timestamp_ms(), Ordering::SeqCst);
 
                             let cb_guard = LOADING_CALLBACK.lock().unwrap();
                             if let Some(callback) = *cb_guard {
