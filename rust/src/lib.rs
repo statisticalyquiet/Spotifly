@@ -1080,7 +1080,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                 Ok(cluster_update) => {
                     debug!("ClusterUpdate parsed successfully");
                     if let Some(cluster) = cluster_update.cluster.into_option() {
-                        debug!("Cluster present");
+                        debug!("Cluster present, active_device_id: '{}'", cluster.active_device_id);
 
                         if let Some(player_state) = cluster.player_state.into_option() {
                             debug!("ClusterUpdate: position_as_of_timestamp={}ms, is_playing={}",
@@ -1153,12 +1153,16 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
         Ok((spirc, spirc_task)) => {
             // Spawn Spirc background task
             let spirc_arc = Arc::new(spirc);
+            let spirc_for_activation = spirc_arc.clone();
             RUNTIME.spawn(spirc_task);
 
-            let mut spirc_guard = SPIRC.lock().unwrap();
-            *spirc_guard = Some(spirc_arc);
-            SPIRC_READY.store(true, Ordering::SeqCst);
-            debug!("SPIRC_READY set to true");
+            // Store Spirc and update state (in a scope to drop the guard before await)
+            {
+                let mut spirc_guard = SPIRC.lock().unwrap();
+                *spirc_guard = Some(spirc_arc);
+                SPIRC_READY.store(true, Ordering::SeqCst);
+                debug!("SPIRC_READY set to true");
+            }
 
             // Mark session as connected immediately - Spirc is ready for commands
             // The SessionConnected event will update connection_id when it arrives
@@ -1170,16 +1174,35 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
 
             debug!("Spirc ready - connected to Spotify Connect");
 
-            // In soft reconnect mode, skip transfer(None) to avoid interrupting current playback
-            // The player is already playing the track - we don't want Spirc to reload it
+            // In soft reconnect mode, skip auto-activation to avoid interrupting current playback
             if is_soft_reconnect {
-                debug!("Soft reconnect: skipping transfer(None) to preserve current playback");
-                // Clear soft reconnect mode now that we're reconnected
+                debug!("Soft reconnect: skipping auto-activation to preserve current playback");
                 SOFT_RECONNECT_MODE.store(false, Ordering::SeqCst);
+            } else {
+                // Auto-activate if no other device is active
+                // We do this after Spirc is ready because librespot's initial cluster check
+                // doesn't activate when there's a stale session ID (common case)
+
+                // Small delay to let librespot's initial cluster processing complete
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+                // Check if we're still not active (no other device took over)
+                if !IS_ACTIVE_DEVICE.load(Ordering::SeqCst) {
+                    debug!("No active device after init, activating Spotifly via transfer");
+                    // Use transfer(None) to become the active device, same as ensure_active_for_playback
+                    match spirc_for_activation.transfer(None) {
+                        Ok(_) => {
+                            debug!("Auto-activation via transfer succeeded");
+                            IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                        }
+                        Err(e) => {
+                            debug!("Auto-activation via transfer failed: {:?}", e);
+                        }
+                    }
+                } else {
+                    debug!("Another device is already active, staying passive");
+                }
             }
-            // Don't call transfer(None) or set IS_ACTIVE_DEVICE on init
-            // We become active only when user explicitly plays content locally
-            drop(spirc_guard);
 
             // Notify Swift that we're connected (Spirc is ready)
             notify_connection_state_change();
