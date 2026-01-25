@@ -62,7 +62,8 @@ static SET_QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Token request callback - Rust requests fresh token from Swift for reconnection
-static TOKEN_REQUEST_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> = Lazy::new(|| Mutex::new(None));
+static TOKEN_REQUEST_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
+    Lazy::new(|| Mutex::new(None));
 // Channel for receiving token from Swift (set via spotifly_set_token)
 static PENDING_TOKEN: Lazy<Mutex<Option<tokio::sync::oneshot::Sender<String>>>> =
     Lazy::new(|| Mutex::new(None));
@@ -183,7 +184,6 @@ struct ConnectionStateInfo {
     last_error: Option<String>,
     connected_since_ms: Option<u64>,
 }
-
 
 #[derive(Serialize)]
 struct SessionClientInfo {
@@ -339,7 +339,6 @@ pub extern "C" fn spotifly_register_session_client_changed_callback(
     *cb = Some(callback);
 }
 
-
 /// Registers a callback to receive set queue notifications.
 /// Called when the queue is set/modified (via set_queue command from mobile app).
 /// The callback receives JSON with next_tracks and prev_tracks arrays containing uri and provider.
@@ -378,7 +377,10 @@ pub extern "C" fn spotifly_set_token(token: *const c_char) {
         }
     };
 
-    debug!("spotifly_set_token: received token ({} chars)", token_str.len());
+    debug!(
+        "spotifly_set_token: received token ({} chars)",
+        token_str.len()
+    );
 
     // Send token to waiting reconnection task
     let mut pending = PENDING_TOKEN.lock().unwrap();
@@ -735,7 +737,8 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
         } else {
             drop(mixer_guard);
             let mixer_config = MixerConfig::default();
-            let new_mixer = Arc::new(SoftMixer::open(mixer_config).map_err(|e| format!("Mixer error: {}", e))?);
+            let new_mixer =
+                Arc::new(SoftMixer::open(mixer_config).map_err(|e| format!("Mixer error: {}", e))?);
             let mut mixer_guard = MIXER.lock().unwrap();
             *mixer_guard = Some(Arc::clone(&new_mixer));
             new_mixer
@@ -743,7 +746,8 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
     } else {
         // Create new mixer
         let mixer_config = MixerConfig::default();
-        let new_mixer = Arc::new(SoftMixer::open(mixer_config).map_err(|e| format!("Mixer error: {}", e))?);
+        let new_mixer =
+            Arc::new(SoftMixer::open(mixer_config).map_err(|e| format!("Mixer error: {}", e))?);
         let mut mixer_guard = MIXER.lock().unwrap();
         *mixer_guard = Some(Arc::clone(&new_mixer));
         new_mixer
@@ -1174,31 +1178,50 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
 
             debug!("Spirc ready - connected to Spotify Connect");
 
-            // In soft reconnect mode, skip auto-activation to avoid interrupting current playback
+            // Clear soft reconnect flag now that we're connected
+            let was_soft_reconnect = is_soft_reconnect;
             if is_soft_reconnect {
-                debug!("Soft reconnect: skipping auto-activation to preserve current playback");
                 SOFT_RECONNECT_MODE.store(false, Ordering::SeqCst);
+            }
+
+            // Auto-activate if needed
+            // We do this after Spirc is ready because librespot's initial cluster check
+            // doesn't activate when there's a stale session ID (common case)
+
+            // Small delay to let librespot's initial cluster processing complete
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+            // Determine if we should activate:
+            // - Fresh start: activate if no device is active (!IS_ACTIVE_DEVICE)
+            // - Soft reconnect: re-activate if we were previously active (IS_ACTIVE_DEVICE still true)
+            //   because the server may have dropped our active status during disconnect
+            let should_activate = if was_soft_reconnect {
+                // After soft reconnect, re-activate if we thought we were active before
+                IS_ACTIVE_DEVICE.load(Ordering::SeqCst)
             } else {
-                // Auto-activate if no other device is active
-                // We do this after Spirc is ready because librespot's initial cluster check
-                // doesn't activate when there's a stale session ID (common case)
+                // Fresh start: activate only if no device is active
+                !IS_ACTIVE_DEVICE.load(Ordering::SeqCst)
+            };
 
-                // Small delay to let librespot's initial cluster processing complete
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
-                // Check if we're still not active (no other device took over)
-                if !IS_ACTIVE_DEVICE.load(Ordering::SeqCst) {
+            if should_activate {
+                if was_soft_reconnect {
+                    debug!("Soft reconnect: re-activating to restore server-side active status");
+                } else {
                     debug!("No active device after init, activating Spotifly via transfer");
-                    // Use transfer(None) to become the active device, same as ensure_active_for_playback
-                    match spirc_for_activation.transfer(None) {
-                        Ok(_) => {
-                            debug!("Auto-activation via transfer succeeded");
-                            IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
-                        }
-                        Err(e) => {
-                            debug!("Auto-activation via transfer failed: {:?}", e);
-                        }
+                }
+                // Use transfer(None) to become the active device
+                match spirc_for_activation.transfer(None) {
+                    Ok(_) => {
+                        debug!("Auto-activation via transfer succeeded");
+                        IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
                     }
+                    Err(e) => {
+                        debug!("Auto-activation via transfer failed: {:?}", e);
+                    }
+                }
+            } else {
+                if was_soft_reconnect {
+                    debug!("Soft reconnect: was not active before, staying passive");
                 } else {
                     debug!("Another device is already active, staying passive");
                 }
@@ -1258,7 +1281,11 @@ const ERROR_NOT_CONNECTED: i32 = -3;
 #[no_mangle]
 pub extern "C" fn spotifly_is_session_connected() -> i32 {
     let state = SESSION_CONNECTION_STATE.lock().unwrap();
-    if state.is_connected { 1 } else { 0 }
+    if state.is_connected {
+        1
+    } else {
+        0
+    }
 }
 
 /// Helper to check if session is connected. Returns ERROR_NOT_CONNECTED if not.
@@ -1343,7 +1370,10 @@ fn send_playback_state(player_state: &PlayerState) {
 /// This is used when Spotifly is the active device - state changes happen locally
 /// and don't come through Mercury cluster updates.
 fn send_local_playback_state(is_playing: bool, position_ms: u32) {
-    debug!("send_local_playback_state called: is_playing={}, position_ms={}", is_playing, position_ms);
+    debug!(
+        "send_local_playback_state called: is_playing={}, position_ms={}",
+        is_playing, position_ms
+    );
 
     let cb_guard = PLAYBACK_STATE_CALLBACK.lock().unwrap();
     if let Some(callback) = *cb_guard {
@@ -1376,10 +1406,7 @@ fn send_local_playback_state(is_playing: bool, position_ms: u32) {
 
         debug!(
             "Local PlaybackState: playing={}, paused={}, position={}ms, duration={}ms",
-            update.is_playing,
-            update.is_paused,
-            update.position_ms,
-            update.duration_ms
+            update.is_playing, update.is_paused, update.position_ms, update.duration_ms
         );
 
         if let Ok(json) = serde_json::to_string(&update) {
@@ -2360,18 +2387,16 @@ pub extern "C" fn spotifly_add_to_queue(uri: *const c_char) -> i32 {
 
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
-        Some(spirc) => {
-            match spirc.add_to_queue(spotify_uri) {
-                Ok(_) => {
-                    debug!("[Spotifly] add_to_queue succeeded");
-                    0
-                }
-                Err(e) => {
-                    debug!("Add to queue error: {:?}", e);
-                    -1
-                }
+        Some(spirc) => match spirc.add_to_queue(spotify_uri) {
+            Ok(_) => {
+                debug!("[Spotifly] add_to_queue succeeded");
+                0
             }
-        }
+            Err(e) => {
+                debug!("Add to queue error: {:?}", e);
+                -1
+            }
+        },
         None => {
             debug!("Add to queue error: Spirc not initialized");
             -1
