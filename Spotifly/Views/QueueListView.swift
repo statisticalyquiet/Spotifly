@@ -22,6 +22,8 @@ struct QueueListView: View {
     @Environment(SpotifySession.self) private var session
     @Environment(AppStore.self) private var store
     @Environment(QueueService.self) private var queueService
+    @Environment(DeviceService.self) private var deviceService
+    @Environment(NavigationCoordinator.self) private var navigationCoordinator
     @Bindable var playbackViewModel: PlaybackViewModel
 
     @State private var scrollProxy: ScrollViewProxy?
@@ -73,6 +75,34 @@ struct QueueListView: View {
         store.nextTrackEntities.count
     }
 
+    /// Context info parsed from context URI
+    private var contextInfo: (type: ContextType, id: String, name: String)? {
+        guard let uri = store.queue.contextUri else { return nil }
+
+        if uri.hasPrefix("spotify:album:") {
+            let id = String(uri.dropFirst("spotify:album:".count))
+            if let album = store.albums[id] {
+                return (.album, id, album.name)
+            }
+        } else if uri.hasPrefix("spotify:playlist:") {
+            let id = String(uri.dropFirst("spotify:playlist:".count))
+            if let playlist = store.playlists[id] {
+                return (.playlist, id, playlist.name)
+            }
+        } else if uri.hasPrefix("spotify:artist:") {
+            let id = String(uri.dropFirst("spotify:artist:".count))
+            if let artist = store.artists[id] {
+                return (.artist, id, artist.name)
+            }
+        }
+
+        return nil
+    }
+
+    private enum ContextType {
+        case album, playlist, artist
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Fixed header
@@ -110,11 +140,17 @@ struct QueueListView: View {
 
     private var queueHeader: some View {
         HStack(spacing: 12) {
-            // Song count
             VStack(alignment: .leading, spacing: 2) {
                 Text("queue.title")
                     .font(.headline)
-                if totalSongCount > 0 {
+
+                // "Playing from X on Y" subtitle
+                if let device = store.activeDevice {
+                    playingFromText(device: device)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if totalSongCount > 0 {
+                    // Fallback to song count if no active device
                     Text("queue.song_count \(totalSongCount) \(unplayedSongCount)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -125,6 +161,46 @@ struct QueueListView: View {
         }
         .padding()
         .background(.regularMaterial)
+    }
+
+    @ViewBuilder
+    private func playingFromText(device: Device) -> some View {
+        let contextName = contextInfo?.name ?? String(localized: "queue.title")
+        let deviceIcon = deviceService.deviceIcon(for: device.type)
+
+        HStack(spacing: 4) {
+            Text("queue.playing_from")
+
+            if let context = contextInfo {
+                // Context name is a tappable link
+                Button {
+                    navigateToContext(type: context.type, id: context.id)
+                } label: {
+                    Text("\"\(contextName)\"")
+                        .foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("\"\(contextName)\"")
+            }
+
+            Text("queue.on_device")
+            Image(systemName: deviceIcon)
+            Text(device.name)
+        }
+    }
+
+    private func navigateToContext(type: ContextType, id: String) {
+        switch type {
+        case .album:
+            navigationCoordinator.navigateToAlbumSection(albumId: id, from: .queue)
+        case .playlist:
+            if let playlist = store.playlists[id] {
+                navigationCoordinator.navigateToPlaylist(playlist)
+            }
+        case .artist:
+            navigationCoordinator.navigateToArtistSection(artistId: id, from: .queue)
+        }
     }
 
     // MARK: - Normal Mode Content

@@ -25,6 +25,8 @@ struct Queue {
     var currentTrack: QueueEntry?
     /// Next tracks in queue
     var nextTracks: [QueueEntry] = []
+    /// Context URI (e.g., "spotify:album:123" or "spotify:playlist:456")
+    var contextUri: String?
     /// Whether queue is currently being fetched/updated
     var isLoading = false
     /// Error message if queue fetch failed
@@ -311,7 +313,7 @@ final class AppStore {
                     isActive: isActive,
                     isPrivateSession: device.isPrivateSession,
                     isRestricted: device.isRestricted,
-                    volumePercent: device.volumePercent
+                    volumePercent: device.volumePercent,
                 )
             } else {
                 updatedDevices[id] = device
@@ -506,12 +508,16 @@ final class AppStore {
     // MARK: - Queue Actions
 
     /// Set queue state with queue entries. If `previous` is nil, preserves existing (Web API doesn't provide history).
-    func setQueue(previous: [QueueEntry]?, current: QueueEntry?, next: [QueueEntry]) {
+    func setQueue(previous: [QueueEntry]?, current: QueueEntry?, next: [QueueEntry], contextUri: String? = nil) {
         if let previous {
             queue.previousTracks = previous
         }
         queue.currentTrack = current
         queue.nextTracks = next
+        // Only update contextUri if provided (non-nil and non-empty)
+        if let uri = contextUri, !uri.isEmpty {
+            queue.contextUri = uri
+        }
     }
 
     /// Insert a track into the queue after any existing manually queued items (provider: .queue),

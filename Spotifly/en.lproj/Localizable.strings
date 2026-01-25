@@ -100,6 +100,8 @@
 
 /* Queue */
 "queue.title" = "Queue";
+"queue.playing_from" = "Playing from";
+"queue.on_device" = "on";
 "queue.song_count %lld %lld" = "%lld songs (%lld upcoming)";
 "queue.scroll_to_current" = "Scroll to current track";
 "queue.refresh" = "Refresh queue";

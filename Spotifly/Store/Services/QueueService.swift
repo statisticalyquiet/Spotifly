@@ -70,7 +70,7 @@ final class QueueService {
         // Previous tracks
         let prevEntries: [QueueEntry] = notification.prevTracks.compactMap { toQueueEntry($0) }
 
-        store.setQueue(previous: prevEntries, current: currentEntry, next: nextEntries)
+        store.setQueue(previous: prevEntries, current: currentEntry, next: nextEntries, contextUri: notification.contextUri)
 
         // Fetch track metadata for IDs not already in store
         let allIds = prevEntries.map(\.trackId) + (currentEntry.map { [$0.trackId] } ?? []) + nextEntries.map(\.trackId)
