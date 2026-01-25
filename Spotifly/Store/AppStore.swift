@@ -254,15 +254,23 @@ final class AppStore {
         }
     }
 
-    /// Upsert a single album
+    /// Upsert a single album, preserving loaded tracks if present
     func upsertAlbum(_ album: Album) {
-        albums[album.id] = album
+        if let existing = albums[album.id], existing.tracksLoaded, !album.tracksLoaded {
+            // Preserve existing trackIds and duration when new album doesn't have them
+            var merged = album
+            merged.trackIds = existing.trackIds
+            merged.totalDurationMs = existing.totalDurationMs
+            albums[album.id] = merged
+        } else {
+            albums[album.id] = album
+        }
     }
 
-    /// Upsert multiple albums
+    /// Upsert multiple albums, preserving loaded tracks if present
     func upsertAlbums(_ newAlbums: [Album]) {
         for album in newAlbums {
-            albums[album.id] = album
+            upsertAlbum(album)
         }
     }
 
@@ -278,15 +286,23 @@ final class AppStore {
         }
     }
 
-    /// Upsert a single playlist
+    /// Upsert a single playlist, preserving loaded tracks if present
     func upsertPlaylist(_ playlist: Playlist) {
-        playlists[playlist.id] = playlist
+        if let existing = playlists[playlist.id], existing.tracksLoaded, !playlist.tracksLoaded {
+            // Preserve existing trackIds and duration when new playlist doesn't have them
+            var merged = playlist
+            merged.trackIds = existing.trackIds
+            merged.totalDurationMs = existing.totalDurationMs
+            playlists[playlist.id] = merged
+        } else {
+            playlists[playlist.id] = playlist
+        }
     }
 
-    /// Upsert multiple playlists
+    /// Upsert multiple playlists, preserving loaded tracks if present
     func upsertPlaylists(_ newPlaylists: [Playlist]) {
         for playlist in newPlaylists {
-            playlists[playlist.id] = playlist
+            upsertPlaylist(playlist)
         }
     }
 
