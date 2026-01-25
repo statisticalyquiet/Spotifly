@@ -82,8 +82,6 @@ final class PlaybackViewModel {
     private var lastAlbumArtURL: String?
     private var playbackStateSubscription: AnyCancellable?
     private var volumeSubscription: AnyCancellable?
-    private var sessionDisconnectedSubscription: AnyCancellable?
-    private var sessionConnectedSubscription: AnyCancellable?
     private var loadingSubscription: AnyCancellable?
     /// Flag to prevent feedback loop when we set volume locally
     private var isSettingVolumeLocally = false
@@ -92,24 +90,9 @@ final class PlaybackViewModel {
     /// Token provider for reinitialization after session disconnect
     private var tokenProvider: (@Sendable () async -> String)?
 
-    /// State to restore after seamless reconnection
-    private var pendingResumeTrackUri: String?
-    private var pendingResumePositionMs: UInt32 = 0
-    private var pendingResumeWasPlaying: Bool = false
-
-    /// Timestamp when session was disconnected (for logging elapsed time on reconnect)
-    private var disconnectedAt: Date?
-
-    /// Reconnection state for exponential backoff
-    private var reconnectAttempt: Int = 0
-    private var reconnectTask: Task<Void, Never>?
-    private let maxReconnectAttempts = 10
-
     private init() {
         setupPlaybackStateSubscription()
         setupVolumeSubscription()
-        setupSessionDisconnectedSubscription()
-        setupSessionConnectedSubscription()
         setupLoadingSubscription()
         setupRemoteCommandCenter()
 
@@ -273,14 +256,6 @@ final class PlaybackViewModel {
         SpotifyPlayer.stop()
         isPlaying = false
         currentTrackUri = nil
-    }
-
-    func updatePlayingState() {
-        // Only sync from local Spirc when we're the active device
-        // Remote playback state comes from cluster updates
-        if SpotifyPlayer.isActiveDevice {
-            isPlaying = SpotifyPlayer.isPlaying
-        }
     }
 
     /// Sets the AppStore reference. Call this after AppStore is created.
@@ -608,137 +583,6 @@ final class PlaybackViewModel {
             }
     }
 
-    /// Reconnection delays: 0s, 2s, 5s, 10s, 30s, 30s...
-    /// First attempt is immediate to recover within audio buffer (~5s)
-    private func reconnectDelay(attempt: Int) -> TimeInterval {
-        switch attempt {
-        case 0: 0 // Immediate - try to beat the buffer
-        case 1: 2 // Quick retry
-        case 2: 5 // Still within reasonable gap
-        case 3: 10 // Network might be recovering
-        default: 30 // Back off for persistent issues
-        }
-    }
-
-    /// Subscribe to session disconnection events from Spirc
-    /// Automatically reinitializes the player with a fresh token when the channel closes
-    private func setupSessionDisconnectedSubscription() {
-        sessionDisconnectedSubscription = SpotifyPlayer.sessionDisconnected
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] in
-                guard let self else { return }
-
-                // Capture current playback state for seamless resumption
-                let wasPlaying = isPlaying
-                let trackUri = currentTrackUri
-                let positionMs = currentPositionMs
-
-                // Record disconnect timestamp for elapsed time logging
-                disconnectedAt = Date()
-
-                debugLog("PlaybackViewModel", "Session disconnected at \(Date()) - capturing state: uri=\(trackUri ?? "nil"), pos=\(positionMs)ms, playing=\(wasPlaying)")
-
-                // Store state for resumption after reconnect
-                if wasPlaying, let uri = trackUri, !uri.isEmpty {
-                    pendingResumeTrackUri = uri
-                    pendingResumePositionMs = positionMs
-                    pendingResumeWasPlaying = true
-
-                    // Use soft cleanup to preserve Player for uninterrupted audio
-                    // This only clears Session/Spirc, keeping audio pipeline alive
-                    debugLog("PlaybackViewModel", "Using soft cleanup to preserve audio during reconnect")
-                    SpotifyPlayer.softCleanup()
-                }
-
-                // Mark as not initialized so next action reinitializes
-                isInitialized = false
-                // Don't set isPlaying = false yet - keep UI showing playing state during reconnect
-
-                // Cancel any existing reconnect task
-                reconnectTask?.cancel()
-
-                // Start exponential backoff reconnection loop
-                guard let tokenProvider else { return }
-
-                reconnectTask = Task { @MainActor [weak self] in
-                    guard let self else { return }
-
-                    while reconnectAttempt < maxReconnectAttempts {
-                        // Check for cancellation
-                        if Task.isCancelled { break }
-
-                        let delay = reconnectDelay(attempt: reconnectAttempt)
-                        debugLog("PlaybackViewModel", "Reconnect attempt \(reconnectAttempt + 1)/\(maxReconnectAttempts), delay: \(delay)s")
-
-                        // Wait for delay (if any)
-                        if delay > 0 {
-                            try? await Task.sleep(for: .seconds(delay))
-                        }
-
-                        // Check for cancellation again
-                        if Task.isCancelled { break }
-
-                        // Attempt reconnection
-                        let token = await tokenProvider()
-                        await initializeIfNeeded(accessToken: token)
-
-                        // If initialized, we're done - SessionConnected callback will handle the rest
-                        if isInitialized {
-                            debugLog("PlaybackViewModel", "Reconnection successful on attempt \(reconnectAttempt + 1)")
-                            break
-                        }
-
-                        reconnectAttempt += 1
-                    }
-
-                    // If we exhausted attempts, give up and update UI
-                    if reconnectAttempt >= maxReconnectAttempts {
-                        debugLog("PlaybackViewModel", "Reconnection failed after \(maxReconnectAttempts) attempts")
-                        isPlaying = false
-                        pendingResumeWasPlaying = false
-                    }
-                }
-            }
-    }
-
-    /// Subscribe to session connection events from Spirc
-    /// Resumes playback if we have pending state from a disconnect
-    private func setupSessionConnectedSubscription() {
-        sessionConnectedSubscription = SpotifyPlayer.sessionConnected
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] in
-                guard let self else { return }
-
-                // Reset reconnect state on successful connection
-                reconnectAttempt = 0
-                reconnectTask?.cancel()
-                reconnectTask = nil
-
-                // Check if we have pending playback to resume
-                guard pendingResumeWasPlaying,
-                      let trackUri = pendingResumeTrackUri,
-                      !trackUri.isEmpty
-                else {
-                    return
-                }
-
-                let positionMs = pendingResumePositionMs
-
-                let elapsed = disconnectedAt.map { Date().timeIntervalSince($0) } ?? 0
-                debugLog("PlaybackViewModel", "Session reconnected after \(String(format: "%.1f", elapsed))s - pending resume: uri=\(trackUri), pos=\(positionMs)ms")
-
-                // Clear URI/position but KEEP pendingResumeWasPlaying flag
-                // The Rust layer calls transfer(None) which loads the track at correct position
-                // BUT the cluster state has is_paused=true (set by old Spirc shutdown)
-                // We'll resume in the Loading callback when the track starts loading
-                pendingResumeTrackUri = nil
-                pendingResumePositionMs = 0
-                // NOTE: Don't clear pendingResumeWasPlaying - Loading handler will use it
-
-                debugLog("PlaybackViewModel", "Session reconnected - awaiting Loading callback to resume")
-            }
-    }
-
     /// Subscribe to loading notifications from Spirc
     /// This fires early (~180ms) when a track starts loading, before metadata is fetched
     /// Allows faster Now Playing updates when playing from remote devices
@@ -762,15 +606,6 @@ final class PlaybackViewModel {
                     positionAnchorMs = posMs
                     positionAnchorTime = CACurrentMediaTime()
                     currentPositionMs = posMs
-                }
-
-                // Resume playback after reconnect if we were playing before disconnect
-                // The transfer(None) loads the track at correct position but paused
-                // (because old Spirc set is_paused=true during shutdown)
-                if pendingResumeWasPlaying {
-                    pendingResumeWasPlaying = false
-                    debugLog("PlaybackViewModel", "Resuming playback after reconnect (was playing before disconnect)")
-                    SpotifyPlayer.resume()
                 }
             }
     }
