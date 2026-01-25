@@ -51,8 +51,17 @@ final class DeviceService {
         // Optimistically mark the target device as active for immediate UI feedback
         store.setActiveDevice(device.id)
 
+        // Check if target is our local device
+        let isLocalDevice = device.id == store.connection?.deviceId
+
         do {
-            try SpotifyPlayer.transferPlayback(to: device.id)
+            if isLocalDevice {
+                // Transfer TO local - use Spirc's native transfer
+                try SpotifyPlayer.transferToLocal()
+            } else {
+                // Transfer FROM local to remote device
+                try SpotifyPlayer.transferPlayback(to: device.id)
+            }
 
             // Schedule a delayed refresh to confirm the state
             // (Web API returns stale data immediately after transfer)
