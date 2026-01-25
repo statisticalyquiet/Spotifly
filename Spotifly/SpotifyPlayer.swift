@@ -379,7 +379,9 @@ private nonisolated func registerSessionDisconnectedCallback() {
 /// Fires when the Spotify session disconnects (e.g., idle timeout)
 private nonisolated func handleSessionDisconnectedCallback() {
     debugLog("SpotifyPlayer", "Session disconnected event received - triggering reinit")
-    sessionDisconnectedSubject.send()
+    DispatchQueue.main.async {
+        sessionDisconnectedSubject.send()
+    }
 }
 
 /// Registers the session connected callback with Rust (fires when session is ready)
@@ -393,7 +395,9 @@ private nonisolated func registerSessionConnectedCallback() {
 /// Fires when the Spotify session is connected and ready for playback commands
 private nonisolated func handleSessionConnectedCallback() {
     debugLog("SpotifyPlayer", "Session connected event received - ready for commands")
-    sessionConnectedSubject.send()
+    DispatchQueue.main.async {
+        sessionConnectedSubject.send()
+    }
 }
 
 /// Registers the session client changed callback with Rust
@@ -813,7 +817,9 @@ enum SpotifyPlayer {
     static func pause() {
         let result = spotifly_pause()
         if result == errorNeedsReinit {
-            sessionDisconnectedSubject.send()
+            DispatchQueue.main.async {
+                sessionDisconnectedSubject.send()
+            }
         }
     }
 
@@ -822,7 +828,9 @@ enum SpotifyPlayer {
     static func resume() {
         let result = spotifly_resume()
         if result == errorNeedsReinit {
-            sessionDisconnectedSubject.send()
+            DispatchQueue.main.async {
+                sessionDisconnectedSubject.send()
+            }
         }
     }
 
@@ -909,7 +917,9 @@ enum SpotifyPlayer {
         let volumeU16 = UInt16(max(0, min(1, volume)) * 65535.0)
         let result = spotifly_set_volume(volumeU16)
         if result == errorNeedsReinit {
-            sessionDisconnectedSubject.send()
+            DispatchQueue.main.async {
+                sessionDisconnectedSubject.send()
+            }
         }
     }
 
