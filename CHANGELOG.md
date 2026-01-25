@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Automatic reconnection with exponential backoff when session disconnects (Rust handles reconnection loop, Swift provides fresh tokens on request)
+
 ### Changed
 - Transfer to local playback now uses librespot's native `Spirc.transfer()` method instead of Web API workaround
 - Transfer to remote devices now uses librespot's native `SpClient.transfer()` method instead of Web API workaround
@@ -33,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After transferring playback to another device, the remote device is now shown as active immediately in the Speakers view - uses optimistic UI updates with delayed confirmation
 
 ### Removed
+- Manual session disconnect handling in Swift playback commands (pause/resume/setVolume) - Rust now handles reconnection automatically
+- `SpotifyPlayerError.sessionDisconnected` error case - no longer needed since Rust handles reconnection
 - Obsolete 500ms seek delay hack for transfer to local - native transfer preserves position seamlessly
 - Obsolete Web API transfer functions (`SpotifyAPI.transferPlayback()`, `SpotifyAPI.startPlayback()`) - replaced by native librespot calls
 - Local queue management (`QUEUE`, `CURRENT_INDEX`) - queue is now fully managed by Spirc's ConnectState

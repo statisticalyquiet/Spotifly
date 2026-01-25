@@ -61,6 +61,14 @@ static SET_QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
+// Token request callback - Rust requests fresh token from Swift for reconnection
+static TOKEN_REQUEST_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> = Lazy::new(|| Mutex::new(None));
+// Channel for receiving token from Swift (set via spotifly_set_token)
+static PENDING_TOKEN: Lazy<Mutex<Option<tokio::sync::oneshot::Sender<String>>>> =
+    Lazy::new(|| Mutex::new(None));
+// Flag to track if reconnection is in progress
+static RECONNECTING: AtomicBool = AtomicBool::new(false);
+
 // Session state tracking - guards playback commands until session is ready
 struct SessionConnectionState {
     connection_id: Option<String>,
@@ -341,6 +349,48 @@ pub extern "C" fn spotifly_register_set_queue_callback(callback: extern "C" fn(*
     *cb = Some(callback);
 }
 
+/// Registers a callback for token requests during reconnection.
+/// When Rust needs a fresh token to reconnect, it calls this callback.
+/// Swift should respond by calling spotifly_set_token() with a fresh access token.
+#[no_mangle]
+pub extern "C" fn spotifly_register_token_request_callback(callback: extern "C" fn()) {
+    let mut cb = TOKEN_REQUEST_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
+/// Provides a fresh access token for reconnection.
+/// Called by Swift in response to the token request callback.
+/// The token is passed to the pending reconnection attempt.
+#[no_mangle]
+pub extern "C" fn spotifly_set_token(token: *const c_char) {
+    if token.is_null() {
+        debug!("spotifly_set_token: token is null");
+        return;
+    }
+
+    let token_str = unsafe {
+        match CStr::from_ptr(token).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                debug!("spotifly_set_token: invalid token string");
+                return;
+            }
+        }
+    };
+
+    debug!("spotifly_set_token: received token ({} chars)", token_str.len());
+
+    // Send token to waiting reconnection task
+    let mut pending = PENDING_TOKEN.lock().unwrap();
+    if let Some(sender) = pending.take() {
+        if sender.send(token_str).is_err() {
+            debug!("spotifly_set_token: receiver dropped");
+        }
+    } else {
+        debug!("spotifly_set_token: no pending token request");
+    }
+}
+
 /// Registers a callback to receive connection state change notifications.
 /// Called whenever the connection state changes (connect, disconnect, error, etc.).
 /// The callback receives JSON with full connection state.
@@ -399,6 +449,156 @@ fn notify_connection_state_change() {
             cb(c_str.as_ptr());
         }
     }
+}
+
+/// Request a fresh token from Swift via callback
+fn request_token_from_swift() {
+    let cb_guard = TOKEN_REQUEST_CALLBACK.lock().unwrap();
+    if let Some(callback) = *cb_guard {
+        let cb = callback;
+        drop(cb_guard);
+        debug!("Requesting fresh token from Swift");
+        cb();
+    } else {
+        debug!("No token request callback registered");
+    }
+}
+
+/// Spawns the reconnection loop task.
+/// Uses exponential backoff and requests fresh tokens from Swift.
+fn spawn_reconnection_loop() {
+    // Check if already reconnecting
+    if RECONNECTING.swap(true, Ordering::SeqCst) {
+        debug!("Reconnection already in progress, skipping");
+        return;
+    }
+
+    RUNTIME.spawn(async {
+        // Backoff delays in seconds: immediate, then 2, 5, 10, then 30s intervals
+        let delays = [0u64, 2, 5, 10, 30, 30, 30, 30, 30, 30];
+
+        for (attempt, delay) in delays.iter().enumerate() {
+            // Wait before this attempt (skip delay on first attempt)
+            if *delay > 0 {
+                debug!("Reconnect attempt {} in {}s", attempt + 1, delay);
+                tokio::time::sleep(Duration::from_secs(*delay)).await;
+            }
+
+            // Update reconnect attempt counter and notify UI
+            RECONNECT_ATTEMPT.store(attempt as u32 + 1, Ordering::SeqCst);
+            {
+                let mut last_error = LAST_ERROR.lock().unwrap();
+                *last_error = Some(format!("Reconnecting (attempt {})", attempt + 1));
+            }
+            notify_connection_state_change();
+
+            // Create oneshot channel for token
+            let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+            {
+                let mut pending = PENDING_TOKEN.lock().unwrap();
+                *pending = Some(tx);
+            }
+
+            // Request fresh token from Swift
+            request_token_from_swift();
+
+            // Wait for token with timeout
+            let token_result = tokio::time::timeout(Duration::from_secs(10), rx).await;
+
+            let token = match token_result {
+                Ok(Ok(t)) => t,
+                Ok(Err(_)) => {
+                    debug!("Token channel closed");
+                    continue;
+                }
+                Err(_) => {
+                    debug!("Token request timed out");
+                    continue;
+                }
+            };
+
+            debug!("Received token for reconnect attempt {}", attempt + 1);
+
+            // Perform soft cleanup before reconnecting
+            do_soft_cleanup();
+
+            // Attempt to reinitialize with fresh token
+            match init_player_async(&token).await {
+                Ok(_) => {
+                    debug!("Reconnection successful on attempt {}", attempt + 1);
+                    RECONNECTING.store(false, Ordering::SeqCst);
+                    // SessionConnected event will reset RECONNECT_ATTEMPT and notify
+                    return;
+                }
+                Err(e) => {
+                    debug!("Reconnection attempt {} failed: {}", attempt + 1, e);
+                    {
+                        let mut last_error = LAST_ERROR.lock().unwrap();
+                        *last_error = Some(format!("Reconnect failed: {}", e));
+                    }
+                    notify_connection_state_change();
+                }
+            }
+        }
+
+        // All attempts exhausted
+        debug!("All reconnection attempts exhausted");
+        RECONNECTING.store(false, Ordering::SeqCst);
+        {
+            let mut last_error = LAST_ERROR.lock().unwrap();
+            *last_error = Some("Reconnection failed after 10 attempts".to_string());
+        }
+        notify_connection_state_change();
+
+        // Notify Swift that reconnection failed - it may want to show UI
+        let cb_guard = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
+        if let Some(callback) = *cb_guard {
+            let cb = callback;
+            drop(cb_guard);
+            debug!("Notifying Swift of reconnection failure");
+            cb();
+        }
+    });
+}
+
+/// Performs soft cleanup - preserves Player and Mixer for uninterrupted playback.
+/// Only clears Session and Spirc.
+fn do_soft_cleanup() {
+    debug!("do_soft_cleanup: preserving Player for uninterrupted playback");
+
+    // Set soft reconnect mode - this tells init to skip transfer(None)
+    SOFT_RECONNECT_MODE.store(true, Ordering::SeqCst);
+    SKIP_SESSION_CONNECTED_TRANSFER.store(true, Ordering::SeqCst);
+
+    // Clear Spirc
+    {
+        let mut spirc_guard = SPIRC.lock().unwrap();
+        *spirc_guard = None;
+    }
+    SPIRC_READY.store(false, Ordering::SeqCst);
+
+    // Clear session
+    {
+        let mut session_guard = SESSION.lock().unwrap();
+        *session_guard = None;
+    }
+
+    // Clear device ID (will be regenerated)
+    {
+        let mut device_id_guard = DEVICE_ID.lock().unwrap();
+        *device_id_guard = None;
+    }
+
+    // DON'T clear Player or Mixer - keep audio playing!
+
+    // Reset session connection state
+    {
+        let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
+        state.is_connected = false;
+        state.connection_id = None;
+    }
+
+    CONNECTED_SINCE_MS.store(0, Ordering::SeqCst);
 }
 
 /// Initializes the player with the given access token.
@@ -767,9 +967,8 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 state.is_connected = false;
                                 state.connection_id = None;
                             }
-                            // Clear connected timestamp and increment reconnect counter
+                            // Clear connected timestamp
                             CONNECTED_SINCE_MS.store(0, Ordering::SeqCst);
-                            RECONNECT_ATTEMPT.fetch_add(1, Ordering::SeqCst);
                             // Store disconnect as last error
                             {
                                 let mut last_error = LAST_ERROR.lock().unwrap();
@@ -777,12 +976,9 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                             }
                             // Notify connection state change
                             notify_connection_state_change();
-                            let cb_guard = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
-                            if let Some(callback) = *cb_guard {
-                                let cb = callback;
-                                drop(cb_guard);
-                                cb();
-                            }
+
+                            // Spawn reconnection loop - Rust handles backoff and token requests
+                            spawn_reconnection_loop();
                         }
                         Some(PlayerEvent::SessionConnected { connection_id, user_name }) => {
                             debug!("SessionConnected event: connection_id={}, user={}, timestamp_ms={}", connection_id, user_name, current_timestamp_ms());
@@ -908,14 +1104,14 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
         debug!("Cluster listener task ended");
 
         // When cluster listener ends, Spirc is dead. If we were connected,
-        // trigger disconnect callback as fallback (in case SessionDisconnectedEvent wasn't emitted)
+        // spawn reconnection loop as fallback (in case SessionDisconnectedEvent wasn't emitted)
         let was_connected = {
             let state = SESSION_CONNECTION_STATE.lock().unwrap();
             state.is_connected
         };
 
         if was_connected {
-            debug!("Cluster listener ended while session was connected - triggering fallback disconnect");
+            debug!("Cluster listener ended while session was connected - triggering fallback reconnect");
             // Update session state
             {
                 let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
@@ -923,21 +1119,14 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                 state.connection_id = None;
             }
             CONNECTED_SINCE_MS.store(0, Ordering::SeqCst);
-            RECONNECT_ATTEMPT.fetch_add(1, Ordering::SeqCst);
             {
                 let mut last_error = LAST_ERROR.lock().unwrap();
                 *last_error = Some("Cluster listener ended unexpectedly".to_string());
             }
             notify_connection_state_change();
 
-            // Trigger session disconnected callback
-            let cb_guard = SESSION_DISCONNECTED_CALLBACK.lock().unwrap();
-            if let Some(callback) = *cb_guard {
-                let cb = callback;
-                drop(cb_guard);
-                debug!("Calling session disconnected callback from cluster listener");
-                cb();
-            }
+            // Spawn reconnection loop
+            spawn_reconnection_loop();
         }
     });
 

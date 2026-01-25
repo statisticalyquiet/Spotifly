@@ -141,8 +141,9 @@ struct LoggedInView: View {
 
             _ = await (favorites, topArtists, newReleases, recentlyPlayed)
 
-            // Set token provider for automatic reinitialization on session disconnect
+            // Set token provider for automatic reconnection
             playbackViewModel.setTokenProvider { await session.validAccessToken() }
+            SpotifyPlayer.setTokenProvider(session)
 
             // Initialize player/Spirc so Spotifly appears as a Connect device
             await playbackViewModel.initializeIfNeeded(accessToken: token)
