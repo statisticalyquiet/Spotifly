@@ -29,10 +29,10 @@ struct LoggedInView: View {
     @State private var artistService: ArtistService
     @State private var queueService: QueueService
     @State private var connectionService: ConnectionService
+    @State private var deviceService: DeviceService
 
     // Services - stateless, created on demand (all state lives in AppStore)
     private var trackService: TrackService { TrackService(store: store) }
-    private var deviceService: DeviceService { DeviceService(store: store) }
     private var recentlyPlayedService: RecentlyPlayedService { RecentlyPlayedService(store: store) }
     private var searchService: SearchService { SearchService(store: store) }
     private var topItemsService: TopItemsService { TopItemsService(store: store) }
@@ -57,6 +57,7 @@ struct LoggedInView: View {
             await session.validAccessToken()
         }))
         _connectionService = State(initialValue: ConnectionService(store: store))
+        _deviceService = State(initialValue: DeviceService(store: store))
 
         // Give PlaybackViewModel access to AppStore for reading current track metadata
         playbackViewModel.setStore(store)
@@ -504,6 +505,8 @@ struct LoggedInView: View {
             GeometryReader { geometry in
                 Color.clear
                     .task(id: geometry.size.width) {
+                        // Only log and update if width actually changed (not just view recreation)
+                        guard sidebarWidth != geometry.size.width else { return }
                         debugLog("SidebarWidth", "Updating sidebarWidth to: \(geometry.size.width)")
                         await MainActor.run {
                             sidebarWidth = geometry.size.width

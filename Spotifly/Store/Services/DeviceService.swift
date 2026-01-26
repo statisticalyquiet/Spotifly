@@ -12,6 +12,7 @@ import Foundation
 @Observable
 final class DeviceService {
     private let store: AppStore
+    private var loadDevicesTask: Task<Void, Never>?
 
     init(store: AppStore) {
         self.store = store
@@ -20,26 +21,38 @@ final class DeviceService {
     // MARK: - Device Loading
 
     /// Load available Spotify Connect devices
+    /// Uses stored task pattern to handle view recreation (e.g., sidebar width changes)
     func loadDevices(accessToken: String) async {
-        // Deduplicate concurrent requests - just skip if already loading
-        guard !store.devicesIsLoading else { return }
+        // If already loading, await existing task instead of skipping
+        // This handles view recreation where .task fires again
+        if let existingTask = loadDevicesTask {
+            await existingTask.value
+            return
+        }
 
         store.devicesIsLoading = true
         store.devicesErrorMessage = nil
 
-        do {
-            let response = try await SpotifyAPI.fetchAvailableDevices(accessToken: accessToken)
-            store.upsertDevices(response.devices)
-            // activeDeviceId is now computed from devices, no need to set it
-        } catch is CancellationError {
-            // Task was cancelled (e.g., view dismissed) - don't show error
-        } catch let error as SpotifyAPIError {
-            store.devicesErrorMessage = error.localizedDescription
-        } catch {
-            store.devicesErrorMessage = String(localized: "speakers.error.failed_to_load")
+        loadDevicesTask = Task {
+            defer {
+                self.loadDevicesTask = nil
+                self.store.devicesIsLoading = false
+            }
+
+            do {
+                let response = try await SpotifyAPI.fetchAvailableDevices(accessToken: accessToken)
+                self.store.upsertDevices(response.devices)
+                // activeDeviceId is now computed from devices, no need to set it
+            } catch is CancellationError {
+                // Task was cancelled (e.g., view dismissed) - don't show error
+            } catch let error as SpotifyAPIError {
+                self.store.devicesErrorMessage = error.localizedDescription
+            } catch {
+                self.store.devicesErrorMessage = String(localized: "speakers.error.failed_to_load")
+            }
         }
 
-        store.devicesIsLoading = false
+        await loadDevicesTask?.value
     }
 
     // MARK: - Playback Transfer
