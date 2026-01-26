@@ -1,3 +1,5 @@
+mod proxy_sink;
+
 use futures_util::StreamExt;
 use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, Spirc};
 use librespot_core::cache::Cache;
@@ -5,11 +7,11 @@ use librespot_core::config::DeviceType;
 use librespot_core::session::Session;
 use librespot_core::SessionConfig;
 use librespot_core::SpotifyUri;
-use librespot_playback::audio_backend;
 use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
 use librespot_playback::mixer::softmixer::SoftMixer;
 use librespot_playback::mixer::{Mixer, MixerConfig};
 use librespot_playback::player::{Player, PlayerEvent};
+use proxy_sink::mk_proxy_sink;
 use librespot_protocol::connect::ClusterUpdate;
 use librespot_protocol::player::PlayerState;
 use log::debug;
@@ -699,13 +701,13 @@ fn create_new_player(session: &Session, mixer: &Arc<SoftMixer>) -> Result<Arc<Pl
     };
     let audio_format = AudioFormat::default();
 
-    let backend = audio_backend::find(None).ok_or("No audio backend found")?;
-
+    // Use ProxySink - a persistent audio output that survives across Player instances.
+    // This enables seamless audio during session reconnection.
     let player = Player::new(
         player_config,
         session.clone(),
         mixer.get_soft_volume(),
-        move || backend(None, audio_format),
+        move || mk_proxy_sink(None, audio_format),
     );
 
     // Store player globally

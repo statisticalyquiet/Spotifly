@@ -2472,6 +2472,7 @@ dependencies = [
 name = "spotifly-rust"
 version = "0.1.0"
 dependencies = [
+ "cpal",
  "env_logger",
  "futures-util",
  "librespot-connect",
@@ -2481,6 +2482,7 @@ dependencies = [
  "log",
  "once_cell",
  "protobuf",
+ "rodio",
  "serde",
  "serde_json",
  "tokio",
