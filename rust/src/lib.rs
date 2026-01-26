@@ -99,10 +99,6 @@ static CURRENT_DURATION_MS: AtomicU32 = AtomicU32::new(0);
 
 // Current track URI - for detecting same-track reconnects
 static CURRENT_TRACK_URI: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
-// Flag to indicate soft reconnect mode (Player kept alive)
-static SOFT_RECONNECT_MODE: AtomicBool = AtomicBool::new(false);
-// Flag to skip transfer in SessionConnected (set during soft reconnect, cleared after use)
-static SKIP_SESSION_CONNECTED_TRANSFER: AtomicBool = AtomicBool::new(false);
 
 // Connection state tracking - for transparency dashboard
 static RECONNECT_ATTEMPT: AtomicU32 = AtomicU32::new(0);
@@ -520,8 +516,9 @@ fn spawn_reconnection_loop() {
 
             debug!("Received token for reconnect attempt {}", attempt + 1);
 
-            // Perform soft cleanup before reconnecting
-            do_soft_cleanup();
+            // Perform full cleanup before reconnecting - must create new Player with new Session
+            // because Player is tightly coupled to Session's ChannelManager for key requests
+            do_reconnect_cleanup();
 
             // Attempt to reinitialize with fresh token
             match init_player_async(&token).await {
@@ -562,23 +559,40 @@ fn spawn_reconnection_loop() {
     });
 }
 
-/// Performs soft cleanup - preserves Player and Mixer for uninterrupted playback.
-/// Only clears Session and Spirc.
-fn do_soft_cleanup() {
-    debug!("do_soft_cleanup: preserving Player for uninterrupted playback");
+/// Performs full cleanup for reconnection.
+/// Clears Session, Spirc, Player, and Mixer because Player is tightly coupled
+/// to the Session's ChannelManager for decryption key requests.
+fn do_reconnect_cleanup() {
+    debug!("do_reconnect_cleanup: full cleanup for reconnection");
 
-    // Set soft reconnect mode - this tells init to skip transfer(None)
-    SOFT_RECONNECT_MODE.store(true, Ordering::SeqCst);
-    SKIP_SESSION_CONNECTED_TRANSFER.store(true, Ordering::SeqCst);
+    // Signal event listener to stop
+    {
+        let mut tx_guard = PLAYER_EVENT_TX.lock().unwrap();
+        if let Some(tx) = tx_guard.take() {
+            let _ = tx.send(());
+        }
+    }
 
-    // Clear Spirc
+    // Clear Spirc first (it holds references to player and session)
     {
         let mut spirc_guard = SPIRC.lock().unwrap();
         *spirc_guard = None;
     }
     SPIRC_READY.store(false, Ordering::SeqCst);
 
-    // Clear session
+    // Clear Player - must be recreated with new Session
+    {
+        let mut player_guard = PLAYER.lock().unwrap();
+        *player_guard = None;
+    }
+
+    // Clear Mixer
+    {
+        let mut mixer_guard = MIXER.lock().unwrap();
+        *mixer_guard = None;
+    }
+
+    // Clear Session
     {
         let mut session_guard = SESSION.lock().unwrap();
         *session_guard = None;
@@ -590,8 +604,6 @@ fn do_soft_cleanup() {
         *device_id_guard = None;
     }
 
-    // DON'T clear Player or Mixer - keep audio playing!
-
     // Reset session connection state
     {
         let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
@@ -600,6 +612,8 @@ fn do_soft_cleanup() {
     }
 
     CONNECTED_SINCE_MS.store(0, Ordering::SeqCst);
+
+    debug!("do_reconnect_cleanup complete");
 }
 
 /// Initializes the player with the given access token.
@@ -704,9 +718,6 @@ fn create_new_player(session: &Session, mixer: &Arc<SoftMixer>) -> Result<Arc<Pl
 }
 
 async fn init_player_async(access_token: &str) -> Result<(), String> {
-    // Check if we're in soft reconnect mode (Player kept alive)
-    let is_soft_reconnect = SOFT_RECONNECT_MODE.load(Ordering::SeqCst);
-
     let device_id = format!("spotifly_{}", std::process::id());
     let session_config = SessionConfig {
         device_id: device_id.clone(),
@@ -729,49 +740,18 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
     // This is important for Spirc to work properly with OAuth tokens
     let session = Session::new(session_config, Some(cache));
 
-    // Get or create mixer
-    let mixer: Arc<SoftMixer> = if is_soft_reconnect {
-        // Reuse existing mixer in soft reconnect mode
-        let mixer_guard = MIXER.lock().unwrap();
-        if let Some(existing_mixer) = mixer_guard.as_ref() {
-            debug!("Soft reconnect: reusing existing mixer");
-            Arc::clone(existing_mixer)
-        } else {
-            drop(mixer_guard);
-            let mixer_config = MixerConfig::default();
-            let new_mixer =
-                Arc::new(SoftMixer::open(mixer_config).map_err(|e| format!("Mixer error: {}", e))?);
-            let mut mixer_guard = MIXER.lock().unwrap();
-            *mixer_guard = Some(Arc::clone(&new_mixer));
-            new_mixer
-        }
-    } else {
-        // Create new mixer
-        let mixer_config = MixerConfig::default();
-        let new_mixer =
-            Arc::new(SoftMixer::open(mixer_config).map_err(|e| format!("Mixer error: {}", e))?);
+    // Create new mixer
+    let mixer_config = MixerConfig::default();
+    let mixer: Arc<SoftMixer> =
+        Arc::new(SoftMixer::open(mixer_config).map_err(|e| format!("Mixer error: {}", e))?);
+    {
         let mut mixer_guard = MIXER.lock().unwrap();
-        *mixer_guard = Some(Arc::clone(&new_mixer));
-        new_mixer
-    };
+        *mixer_guard = Some(Arc::clone(&mixer));
+    }
 
-    // Get or create player
-    let player: Arc<Player> = if is_soft_reconnect {
-        // Try to reuse existing player in soft reconnect mode
-        let player_guard = PLAYER.lock().unwrap();
-        if let Some(existing_player) = player_guard.as_ref() {
-            debug!("Soft reconnect: reusing existing player (audio continues uninterrupted)");
-            Arc::clone(existing_player)
-        } else {
-            // No existing player, create new one
-            drop(player_guard);
-            debug!("Soft reconnect: no existing player, creating new one");
-            create_new_player(&session, &mixer)?
-        }
-    } else {
-        // Normal init: create new player
-        create_new_player(&session, &mixer)?
-    };
+    // Create new player - must be created with the new session because Player is
+    // tightly coupled to Session's ChannelManager for decryption key requests
+    let player = create_new_player(&session, &mixer)?;
 
     // Get event channel from player
     let mut event_channel = player.get_player_event_channel();
@@ -871,7 +851,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                             let track_uri_str = track_id.to_string();
                             debug!("Loading event: {} at {}ms", track_uri_str, position_ms);
 
-                            // Track current playing URI for soft reconnect detection
+                            // Track current playing URI
                             {
                                 let mut uri_guard = CURRENT_TRACK_URI.lock().unwrap();
                                 *uri_guard = Some(track_uri_str.clone());
@@ -963,11 +943,6 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 let mut last_error = LAST_ERROR.lock().unwrap();
                                 *last_error = None;
                             }
-
-                            // Clear soft reconnect flag if set (no longer need to check)
-                            SKIP_SESSION_CONNECTED_TRANSFER.store(false, Ordering::SeqCst);
-                            // Don't call transfer(None) on reconnect - we stay passive
-                            // until user explicitly plays content locally
 
                             // Notify connection state change
                             notify_connection_state_change();
@@ -1139,12 +1114,6 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
 
             debug!("Spirc ready - connected to Spotify Connect");
 
-            // Clear soft reconnect flag now that we're connected
-            let was_soft_reconnect = is_soft_reconnect;
-            if is_soft_reconnect {
-                SOFT_RECONNECT_MODE.store(false, Ordering::SeqCst);
-            }
-
             // Auto-activate if needed
             // We do this after Spirc is ready because librespot's initial cluster check
             // doesn't activate when there's a stale session ID (common case)
@@ -1153,22 +1122,22 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
             // Determine if we should activate:
-            // - Fresh start: activate if no device is active (!IS_ACTIVE_DEVICE)
-            // - Soft reconnect: re-activate if we were previously active (IS_ACTIVE_DEVICE still true)
-            //   because the server may have dropped our active status during disconnect
-            let should_activate = if was_soft_reconnect {
-                // After soft reconnect, re-activate if we thought we were active before
+            // - Reconnect: re-activate if we were previously active (restore server-side status)
+            // - Fresh start: always activate to become the active device
+            let is_reconnect = RECONNECTING.load(Ordering::SeqCst);
+            let should_activate = if is_reconnect {
+                // Re-activate if we were active before the disconnect
                 IS_ACTIVE_DEVICE.load(Ordering::SeqCst)
             } else {
-                // Fresh start: activate only if no device is active
-                !IS_ACTIVE_DEVICE.load(Ordering::SeqCst)
+                // Fresh start: always activate
+                true
             };
 
             if should_activate {
-                if was_soft_reconnect {
-                    debug!("Soft reconnect: re-activating to restore server-side active status");
+                if is_reconnect {
+                    debug!("Reconnect: re-activating to restore server-side active status");
                 } else {
-                    debug!("No active device after init, activating Spotifly via transfer");
+                    debug!("Fresh start: activating Spotifly via transfer");
                 }
                 // Use transfer(None) to become the active device
                 match spirc_for_activation.transfer(None) {
@@ -1181,11 +1150,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                     }
                 }
             } else {
-                if was_soft_reconnect {
-                    debug!("Soft reconnect: was not active before, staying passive");
-                } else {
-                    debug!("Another device is already active, staying passive");
-                }
+                debug!("Reconnect: was not active before, staying passive");
             }
 
             // Notify Swift that we're connected (Spirc is ready)
@@ -1832,55 +1797,6 @@ pub extern "C" fn spotifly_cleanup() {
     notify_connection_state_change();
 
     debug!("spotifly_cleanup complete - ready for reinitialization");
-}
-
-/// Soft cleanup - preserves Player and Mixer for uninterrupted playback.
-/// Only clears Session and Spirc, allowing reconnection without audio gap.
-/// Call this instead of spotifly_cleanup when you want to preserve current playback.
-#[no_mangle]
-pub extern "C" fn spotifly_soft_cleanup() {
-    debug!("spotifly_soft_cleanup called - preserving Player for uninterrupted playback");
-
-    // Set soft reconnect mode - this tells init to skip transfer(None)
-    SOFT_RECONNECT_MODE.store(true, Ordering::SeqCst);
-    // Also skip transfer in SessionConnected handler
-    SKIP_SESSION_CONNECTED_TRANSFER.store(true, Ordering::SeqCst);
-
-    // Clear Spirc (but DON'T signal event listener to stop - Player needs it)
-    {
-        let mut spirc_guard = SPIRC.lock().unwrap();
-        *spirc_guard = None;
-    }
-    SPIRC_READY.store(false, Ordering::SeqCst);
-
-    // Clear session (Player will continue with buffered audio)
-    {
-        let mut session_guard = SESSION.lock().unwrap();
-        *session_guard = None;
-    }
-
-    // Clear device ID (will be regenerated)
-    {
-        let mut device_id_guard = DEVICE_ID.lock().unwrap();
-        *device_id_guard = None;
-    }
-
-    // DON'T clear Player or Mixer - keep audio playing!
-    // DON'T reset IS_PLAYING, POSITION_MS, etc. - preserve playback state
-
-    // Reset session connection state
-    {
-        let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
-        state.is_connected = false;
-        state.connection_id = None;
-    }
-
-    CONNECTED_SINCE_MS.store(0, Ordering::SeqCst);
-
-    // Notify connection state change
-    notify_connection_state_change();
-
-    debug!("spotifly_soft_cleanup complete - Player still running");
 }
 
 /// Returns 1 if currently playing, 0 otherwise.

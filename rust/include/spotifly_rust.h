@@ -70,12 +70,6 @@ int32_t spotifly_shutdown(void);
 /// This clears all static state (session, player, spirc, etc.)
 void spotifly_cleanup(void);
 
-/// Soft cleanup - preserves Player and Mixer for uninterrupted playback.
-/// Only clears Session and Spirc, allowing reconnection without audio gap.
-/// Call this instead of spotifly_cleanup when you want to preserve current playback.
-/// The Player will continue outputting buffered audio while reconnecting.
-void spotifly_soft_cleanup(void);
-
 /// Returns 1 if currently playing, 0 otherwise.
 int32_t spotifly_is_playing(void);
 

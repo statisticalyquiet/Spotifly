@@ -640,9 +640,6 @@ private nonisolated(unsafe) let sessionConnectedSubject = PassthroughSubject<Voi
 
 /// Swift wrapper for the Rust librespot playback functionality
 enum SpotifyPlayer {
-    /// Flag indicating soft reconnect mode (preserves Player during reinit)
-    private nonisolated(unsafe) static var softReconnectMode = false
-
     /// Initializes the player with the given access token.
     /// Must be called before any playback operations.
     @SpotifyAuthActor
@@ -665,17 +662,10 @@ enum SpotifyPlayer {
         syncSettingsFromUserDefaults()
 
         // Clean up any previous session state before initializing
-        // Skip full cleanup in soft reconnect mode - Rust soft_cleanup already cleared Session/Spirc
-        // and we want to preserve the Player for uninterrupted audio
-        if softReconnectMode {
-            debugLog("SpotifyPlayer", "Soft reconnect mode - skipping full cleanup to preserve Player")
-            softReconnectMode = false // Reset flag after use
-        } else {
-            // Full cleanup - necessary because Session instances cannot be reused after disconnection
-            await Task.detached {
-                spotifly_cleanup()
-            }.value
-        }
+        // Full cleanup is necessary because Session instances cannot be reused after disconnection
+        await Task.detached {
+            spotifly_cleanup()
+        }.value
 
         let result = await Task.detached {
             accessToken.withCString { tokenPtr in
@@ -867,14 +857,6 @@ enum SpotifyPlayer {
     /// Call this when the app is quitting to properly disconnect from Spotify Connect.
     static func shutdown() {
         spotifly_shutdown()
-    }
-
-    /// Soft cleanup - preserves Player and Mixer for uninterrupted playback.
-    /// Only clears Session and Spirc, allowing reconnection without audio gap.
-    /// Call this instead of full cleanup when you want to preserve current playback.
-    static func softCleanup() {
-        softReconnectMode = true
-        spotifly_soft_cleanup()
     }
 
     /// Returns whether the player is currently playing.
