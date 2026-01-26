@@ -69,6 +69,8 @@ static PENDING_TOKEN: Lazy<Mutex<Option<tokio::sync::oneshot::Sender<String>>>> 
     Lazy::new(|| Mutex::new(None));
 // Flag to track if reconnection is in progress
 static RECONNECTING: AtomicBool = AtomicBool::new(false);
+// Flag to track intentional shutdown (prevents reconnection attempts during app quit)
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 // Session state tracking - guards playback commands until session is ready
 struct SessionConnectionState {
@@ -617,6 +619,9 @@ pub extern "C" fn spotifly_init_player(access_token: *const c_char) -> i32 {
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "(not set)".to_string());
     debug!("RUST_LOG={}", rust_log);
 
+    // Reset shutdown flag in case we're reinitializing
+    SHUTTING_DOWN.store(false, Ordering::SeqCst);
+
     if access_token.is_null() {
         debug!("Player init error: access_token is null");
         return -1;
@@ -1065,15 +1070,13 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
         }
         debug!("Cluster listener task ended");
 
-        // When cluster listener ends, Spirc is dead. If we were connected,
-        // spawn reconnection loop as fallback (in case SessionDisconnectedEvent wasn't emitted)
-        let was_connected = {
-            let state = SESSION_CONNECTION_STATE.lock().unwrap();
-            state.is_connected
-        };
-
-        if was_connected {
-            debug!("Cluster listener ended while session was connected - triggering fallback reconnect");
+        // When cluster listener ends, Spirc is dead. Always attempt reconnection
+        // unless we're intentionally shutting down. The spawn_reconnection_loop()
+        // function already guards against duplicate attempts via RECONNECTING flag.
+        if SHUTTING_DOWN.load(Ordering::SeqCst) {
+            debug!("Cluster listener ended during shutdown - not reconnecting");
+        } else {
+            debug!("Cluster listener ended - triggering reconnect");
             // Update session state
             {
                 let mut state = SESSION_CONNECTION_STATE.lock().unwrap();
@@ -1749,6 +1752,8 @@ pub extern "C" fn spotifly_stop() -> i32 {
 #[no_mangle]
 pub extern "C" fn spotifly_shutdown() -> i32 {
     debug!("spotifly_shutdown called");
+    // Prevent reconnection attempts during intentional shutdown
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
     let spirc_guard = SPIRC.lock().unwrap();
     if let Some(spirc) = spirc_guard.as_ref() {
         if spirc.shutdown().is_ok() {
