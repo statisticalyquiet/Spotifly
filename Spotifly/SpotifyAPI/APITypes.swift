@@ -203,8 +203,8 @@ enum TopItemsTimeRange: String, Sendable {
 
 // MARK: - Codable Response Types (Internal)
 
-/// These types are used only for JSON decoding from Spotify API responses.
-/// They map directly to the JSON structure, then convert to the public API types.
+// These types are used only for JSON decoding from Spotify API responses.
+// They map directly to the JSON structure, then convert to the public API types.
 
 // MARK: Shared Primitives
 
@@ -468,12 +468,12 @@ struct DeviceCodable: Decodable {
 
 // MARK: - Response Codables
 
-// User profile
+/// User profile
 struct UserProfileCodable: Decodable {
     let id: String
 }
 
-// Saved tracks
+/// Saved tracks
 struct SavedTracksCodable: Decodable {
     let items: [SavedTrackItemCodable]
     let total: Int
@@ -493,7 +493,7 @@ struct SavedTracksCodable: Decodable {
 // Check saved tracks (returns array of bools)
 // Note: This is just [Bool], decoded directly
 
-// Album tracks
+/// Album tracks
 struct AlbumTracksCodable: Decodable {
     let items: [AlbumTrackItemCodable]
 
@@ -533,7 +533,7 @@ struct AlbumTracksCodable: Decodable {
     }
 }
 
-// Playlist tracks
+/// Playlist tracks
 struct PlaylistTracksCodable: Decodable {
     let items: [PlaylistTrackItemCodable]
 
@@ -548,17 +548,17 @@ struct PlaylistTracksCodable: Decodable {
     }
 }
 
-// Artist top tracks
+/// Artist top tracks
 struct ArtistTopTracksCodable: Decodable {
     let tracks: [TrackCodable]
 }
 
-// Multiple tracks (batch fetch)
+/// Multiple tracks (batch fetch)
 struct MultipleTracksCodable: Decodable {
     let tracks: [TrackCodable?] // Can contain nulls for not-found tracks
 }
 
-// User albums
+/// User albums
 struct UserAlbumsCodable: Decodable {
     let items: [UserAlbumItemCodable]
     let total: Int
@@ -569,12 +569,12 @@ struct UserAlbumsCodable: Decodable {
     }
 }
 
-// Artist albums
+/// Artist albums
 struct ArtistAlbumsCodable: Decodable {
     let items: [AlbumCodable]
 }
 
-// New releases
+/// New releases
 struct NewReleasesCodable: Decodable {
     let albums: AlbumsPagingCodable
 
@@ -584,7 +584,7 @@ struct NewReleasesCodable: Decodable {
     }
 }
 
-// User artists (followed)
+/// User artists (followed)
 struct UserArtistsCodable: Decodable {
     let artists: ArtistsPagingCodable
 
@@ -595,26 +595,26 @@ struct UserArtistsCodable: Decodable {
     }
 }
 
-// Top artists
+/// Top artists
 struct TopArtistsCodable: Decodable {
     let items: [ArtistCodable]
     let total: Int
     let next: String?
 }
 
-// User playlists
+/// User playlists
 struct UserPlaylistsCodable: Decodable {
     let items: [PlaylistCodable]
     let total: Int
     let next: String?
 }
 
-// Devices
+/// Devices
 struct DevicesCodable: Decodable {
     let devices: [DeviceCodable]
 }
 
-// Recently played
+/// Recently played
 struct RecentlyPlayedCodable: Decodable {
     let items: [RecentlyPlayedItemCodable]
 
@@ -643,7 +643,7 @@ struct RecentlyPlayedCodable: Decodable {
     }
 }
 
-// Search results
+/// Search results
 struct SearchResultsCodable: Decodable {
     let tracks: TracksPagingCodable?
     let albums: AlbumsPagingCodable?
@@ -663,7 +663,7 @@ struct SearchResultsCodable: Decodable {
     }
 
     struct PlaylistsPagingCodable: Decodable {
-        // Items can be null for deleted/unavailable playlists
+        /// Items can be null for deleted/unavailable playlists
         let items: [PlaylistCodable?]?
     }
 }

@@ -96,7 +96,6 @@ struct StartpageView: View {
 
     // MARK: - Top Artists Section
 
-    @ViewBuilder
     private var topArtistsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("startpage.top_artists")
@@ -135,7 +134,6 @@ struct StartpageView: View {
 
     // MARK: - New Releases Section
 
-    @ViewBuilder
     private var newReleasesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("startpage.new_releases")

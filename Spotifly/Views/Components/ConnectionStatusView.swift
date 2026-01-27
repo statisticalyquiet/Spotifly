@@ -203,7 +203,6 @@ struct ConnectionStatusView: View {
         }
     }
 
-    @ViewBuilder
     private func statusBadge(isConnected: Bool) -> some View {
         HStack(spacing: 4) {
             Circle()

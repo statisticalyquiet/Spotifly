@@ -13,7 +13,7 @@ struct PlaylistsListView: View {
     @Environment(PlaylistService.self) private var playlistService
     @Bindable var playbackViewModel: PlaybackViewModel
 
-    // Selection uses playlist ID, looked up from store
+    /// Selection uses playlist ID, looked up from store
     @Binding var selectedPlaylistId: String?
 
     @State private var errorMessage: String?

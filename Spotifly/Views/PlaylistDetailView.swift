@@ -9,10 +9,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PlaylistDetailView: View {
-    // ID is always required (either passed directly or derived from playlist object)
+    /// ID is always required (either passed directly or derived from playlist object)
     let playlistId: String
 
-    // Optional pre-loaded playlist (avoids network request if already have data)
+    /// Optional pre-loaded playlist (avoids network request if already have data)
     private let initialPlaylist: Playlist?
 
     @Bindable var playbackViewModel: PlaybackViewModel

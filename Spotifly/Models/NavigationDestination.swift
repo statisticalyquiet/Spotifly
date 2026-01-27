@@ -16,7 +16,7 @@ enum NavigationDestination: Hashable {
     case searchTracks(tracks: [Track])
 }
 
-// Make Track array hashable for NavigationDestination
+/// Make Track array hashable for NavigationDestination
 extension NavigationDestination {
     func hash(into hasher: inout Hasher) {
         switch self {

@@ -6,10 +6,9 @@
 //
 
 import Combine
+import MediaPlayer
 import QuartzCore
 import SwiftUI
-
-import MediaPlayer
 
 // MARK: - Drift Correction Timer
 
@@ -67,7 +66,7 @@ final class PlaybackViewModel {
     var trackDurationMs: UInt32 = 0
     var currentPositionMs: UInt32 = 0
 
-    // Volume (0.0 - 1.0)
+    /// Volume (0.0 - 1.0)
     var volume: Double = 0.5 {
         didSet {
             // Skip applying to Spirc if this change came from a remote volume callback
@@ -78,7 +77,7 @@ final class PlaybackViewModel {
         }
     }
 
-    // Favorite status of currently playing track
+    /// Favorite status of currently playing track
     var isCurrentTrackFavorited = false
 
     private var isInitialized = false

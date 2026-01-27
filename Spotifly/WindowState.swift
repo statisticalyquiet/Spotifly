@@ -13,7 +13,7 @@ import SwiftUI
 class WindowState: ObservableObject {
     @Published var isMiniPlayerMode: Bool = false
 
-    // Store the previous window frame to restore when exiting mini player
+    /// Store the previous window frame to restore when exiting mini player
     private var savedWindowFrame: NSRect?
 
     static let miniPlayerSize = NSSize(width: 600, height: 96)

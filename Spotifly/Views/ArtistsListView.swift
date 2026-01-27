@@ -14,7 +14,7 @@ struct ArtistsListView: View {
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
     @Bindable var playbackViewModel: PlaybackViewModel
 
-    // Selection uses artist ID, looked up from store
+    /// Selection uses artist ID, looked up from store
     @Binding var selectedArtistId: String?
 
     /// Callback to handle back navigation (sets the pending navigation in LoggedInView)

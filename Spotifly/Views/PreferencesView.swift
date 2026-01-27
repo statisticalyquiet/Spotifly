@@ -85,7 +85,9 @@ enum StartpageSection: String, CaseIterable, Identifiable {
     case recentlyPlayed
     case newReleases
 
-    var id: String { rawValue }
+    var id: String {
+        rawValue
+    }
 
     var titleKey: LocalizedStringKey {
         switch self {

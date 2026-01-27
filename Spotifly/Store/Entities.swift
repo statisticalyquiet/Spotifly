@@ -59,7 +59,7 @@ struct Album: Identifiable, Sendable, Hashable, Encodable {
     var trackIds: [String]
     var totalDurationMs: Int?
 
-    // Known count from API (before tracks are loaded)
+    /// Known count from API (before tracks are loaded)
     private var _knownTrackCount: Int?
 
     /// Track count - uses loaded trackIds if available, otherwise falls back to API count
@@ -68,7 +68,9 @@ struct Album: Identifiable, Sendable, Hashable, Encodable {
     }
 
     /// Whether tracks have been loaded
-    var tracksLoaded: Bool { !trackIds.isEmpty }
+    var tracksLoaded: Bool {
+        !trackIds.isEmpty
+    }
 
     var formattedDuration: String? {
         guard let totalDurationMs else { return nil }
@@ -136,7 +138,7 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
     var trackIds: [String]
     var totalDurationMs: Int?
 
-    // Known count from API (before tracks are loaded)
+    /// Known count from API (before tracks are loaded)
     private var _knownTrackCount: Int?
 
     /// Track count - uses loaded trackIds if available, otherwise falls back to API count
@@ -145,7 +147,9 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
     }
 
     /// Whether tracks have been loaded
-    var tracksLoaded: Bool { !trackIds.isEmpty }
+    var tracksLoaded: Bool {
+        !trackIds.isEmpty
+    }
 
     var formattedDuration: String? {
         guard let totalDurationMs else { return nil }

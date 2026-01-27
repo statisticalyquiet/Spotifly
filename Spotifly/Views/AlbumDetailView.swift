@@ -9,10 +9,10 @@ import AppKit
 import SwiftUI
 
 struct AlbumDetailView: View {
-    // ID is always required (either passed directly or derived from album object)
+    /// ID is always required (either passed directly or derived from album object)
     let albumId: String
 
-    // Optional pre-loaded album (avoids network request if already have data)
+    /// Optional pre-loaded album (avoids network request if already have data)
     private let initialAlbum: Album?
 
     @Bindable var playbackViewModel: PlaybackViewModel

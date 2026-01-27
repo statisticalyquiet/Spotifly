@@ -13,7 +13,7 @@ import Foundation
 final class RecentlyPlayedService {
     private let store: AppStore
 
-    // Configuration
+    /// Configuration
     private let recentlyPlayedLimit = 30
 
     init(store: AppStore) {

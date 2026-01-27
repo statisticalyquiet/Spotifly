@@ -93,7 +93,9 @@ struct SpotiflyCommands: Commands {
     @FocusedValue(\.session) var session
     @FocusedValue(\.recentlyPlayedService) var recentlyPlayedService
 
-    private var playbackViewModel: PlaybackViewModel { PlaybackViewModel.shared }
+    private var playbackViewModel: PlaybackViewModel {
+        PlaybackViewModel.shared
+    }
 
     var body: some Commands {
         // Replace default New Window command

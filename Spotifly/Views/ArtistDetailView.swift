@@ -8,10 +8,10 @@
 import SwiftUI
 
 struct ArtistDetailView: View {
-    // ID is always required (either passed directly or derived from artist object)
+    /// ID is always required (either passed directly or derived from artist object)
     let artistId: String
 
-    // Optional pre-loaded artist (avoids network request if already have data)
+    /// Optional pre-loaded artist (avoids network request if already have data)
     private let initialArtist: Artist?
 
     @Bindable var playbackViewModel: PlaybackViewModel

@@ -25,7 +25,6 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
     private var loginView: some View {
         VStack(spacing: 20) {
             Image(systemName: "music.note.list")

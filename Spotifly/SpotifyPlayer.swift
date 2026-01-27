@@ -29,7 +29,9 @@ struct QueueItem: Sendable, Identifiable, Equatable, Encodable {
     }
 
     /// Computed property for URL conversion
-    var imageURL: URL? { URL(string: imageURLString) }
+    var imageURL: URL? {
+        URL(string: imageURLString)
+    }
 
     /// Memberwise initializer
     nonisolated init(
@@ -962,7 +964,9 @@ enum SpotifyPlayer {
         case normal = 1 // 160 kbps (default)
         case high = 2 // 320 kbps
 
-        var id: UInt8 { rawValue }
+        var id: UInt8 {
+            rawValue
+        }
 
         var displayName: String {
             switch self {

@@ -20,7 +20,7 @@ struct LoggedInView: View {
     @State private var session: SpotifySession
     private let playbackViewModel = PlaybackViewModel.shared
 
-    // Normalized state store
+    /// Normalized state store
     @State private var store: AppStore
 
     // Services that need Task deduplication or subscription persistence
@@ -31,12 +31,26 @@ struct LoggedInView: View {
     @State private var connectionService: ConnectionService
     @State private var deviceService: DeviceService
 
-    // Services - stateless, created on demand (all state lives in AppStore)
-    private var trackService: TrackService { TrackService(store: store) }
-    private var recentlyPlayedService: RecentlyPlayedService { RecentlyPlayedService(store: store) }
-    private var searchService: SearchService { SearchService(store: store) }
-    private var topItemsService: TopItemsService { TopItemsService(store: store) }
-    private var newReleasesService: NewReleasesService { NewReleasesService(store: store) }
+    /// Services - stateless, created on demand (all state lives in AppStore)
+    private var trackService: TrackService {
+        TrackService(store: store)
+    }
+
+    private var recentlyPlayedService: RecentlyPlayedService {
+        RecentlyPlayedService(store: store)
+    }
+
+    private var searchService: SearchService {
+        SearchService(store: store)
+    }
+
+    private var topItemsService: TopItemsService {
+        TopItemsService(store: store)
+    }
+
+    private var newReleasesService: NewReleasesService {
+        NewReleasesService(store: store)
+    }
 
     @State private var navigationCoordinator = NavigationCoordinator()
 
@@ -76,7 +90,7 @@ struct LoggedInView: View {
     @State private var sidebarWidth: CGFloat = 0
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
-    // Determines if we need three-column layout
+    /// Determines if we need three-column layout
     private var needsThreeColumnLayout: Bool {
         switch selectedNavigationItem {
         case .albums, .artists, .playlists:
@@ -205,7 +219,6 @@ struct LoggedInView: View {
 
     // MARK: - View Builders
 
-    @ViewBuilder
     private var mainLayoutView: some View {
         Group {
             if needsThreeColumnLayout {
@@ -491,7 +504,6 @@ struct LoggedInView: View {
         }
     }
 
-    @ViewBuilder
     private func sidebarView() -> some View {
         SidebarView(
             selection: $selectedNavigationItem,
@@ -574,7 +586,6 @@ struct LoggedInView: View {
         }
     }
 
-    @ViewBuilder
     private func contentView() -> some View {
         NavigationStack(path: $navigationCoordinator.navigationPath) {
             Group {
@@ -677,7 +688,6 @@ struct LoggedInView: View {
         }
     }
 
-    @ViewBuilder
     private func detailView() -> some View {
         Group {
             // Show details for library selections (three-column layout)
