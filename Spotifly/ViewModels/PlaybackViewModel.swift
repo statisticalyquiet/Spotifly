@@ -89,6 +89,10 @@ final class PlaybackViewModel {
     private var isSettingVolumeLocally = false
     /// Debounce task for volume changes
     private var volumeDebounceTask: Task<Void, Never>?
+    /// Subject for debouncing seek requests
+    private let seekSubject = PassthroughSubject<UInt32, Never>()
+    /// Subscription for debounced seek operations
+    private var seekSubscription: AnyCancellable?
     /// Token provider for reinitialization after session disconnect
     private var tokenProvider: (@Sendable () async -> String)?
 
@@ -96,6 +100,7 @@ final class PlaybackViewModel {
         setupPlaybackStateSubscription()
         setupVolumeSubscription()
         setupLoadingSubscription()
+        setupSeekSubscription()
         setupRemoteCommandCenter()
 
         // Load saved volume (but don't apply it yet - mixer isn't initialized)
@@ -323,29 +328,14 @@ final class PlaybackViewModel {
     }
 
     func seek(to positionMs: UInt32) {
-        if SpotifyPlayer.isActiveDevice {
-            do {
-                try SpotifyPlayer.seek(positionMs: positionMs)
-            } catch {
-                errorMessage = error.localizedDescription
-                return
-            }
-        } else {
-            // Remote control via Web API
-            Task {
-                guard let token = await tokenProvider?() else { return }
-                do {
-                    try await SpotifyAPI.seekToPosition(accessToken: token, positionMs: Int(positionMs))
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
-            }
-        }
-        // Update anchor for smooth interpolation from new position
+        // Update anchor immediately for smooth UI feedback during scrubbing
         positionAnchorMs = positionMs
         positionAnchorTime = CACurrentMediaTime()
         currentPositionMs = positionMs
         updateNowPlayingInfo(forcePositionUpdate: true)
+
+        // Debounce the actual seek operation to avoid flooding Spirc/API with requests
+        seekSubject.send(positionMs)
     }
 
     func pause() {
@@ -610,6 +600,37 @@ final class PlaybackViewModel {
                     currentPositionMs = posMs
                 }
             }
+    }
+
+    /// Subscribe to debounced seek requests
+    /// Debounces rapid seek events (e.g., slider scrubbing) to avoid flooding Spirc with requests
+    private func setupSeekSubscription() {
+        seekSubscription = seekSubject
+            .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+            .sink { [weak self] positionMs in
+                self?.performSeek(to: positionMs)
+            }
+    }
+
+    /// Perform the actual seek operation (called after debouncing)
+    private func performSeek(to positionMs: UInt32) {
+        if SpotifyPlayer.isActiveDevice {
+            do {
+                try SpotifyPlayer.seek(positionMs: positionMs)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        } else {
+            // Remote control via Web API
+            Task {
+                guard let token = await tokenProvider?() else { return }
+                do {
+                    try await SpotifyAPI.seekToPosition(accessToken: token, positionMs: Int(positionMs))
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     /// Handle playback state update from Spirc callback
