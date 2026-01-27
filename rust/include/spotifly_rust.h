@@ -52,6 +52,10 @@ int32_t spotifly_play_uri(const char* uri_or_url);
 /// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_pause(void);
 
+/// Clears any buffered audio samples.
+/// Call this before sleep to prevent stale audio playing on wake.
+void spotifly_clear_audio_buffer(void);
+
 /// Resumes playback.
 /// Returns 0 on success, -1 on error, -2 if session disconnected.
 int32_t spotifly_resume(void);
@@ -64,6 +68,13 @@ int32_t spotifly_stop(void);
 /// Call this when the app is quitting to properly disconnect from Spotify Connect.
 /// Returns 0 on success, -1 on error.
 int32_t spotifly_shutdown(void);
+
+/// Disconnects from Spotify Connect without preventing future reconnection.
+/// Use this before system sleep - the device disappears from Spotify immediately,
+/// but forceReconnect() can still bring it back on wake.
+/// Unlike shutdown(), this does NOT block auto-reconnect.
+/// Returns 0 on success, -1 on error.
+int32_t spotifly_disconnect(void);
 
 /// Cleans up all player state, allowing a fresh reinitialization.
 /// Call this before spotifly_init_player() when the session has disconnected.
@@ -172,6 +183,14 @@ void spotifly_register_token_request_callback(TokenRequestCallback callback);
 /// Called by Swift in response to the token request callback.
 /// The token is passed to the pending reconnection attempt.
 void spotifly_set_token(const char* token);
+
+/// Forces a reconnection to Spotify servers.
+/// Use this after system wake to ensure a fresh connection before playback.
+/// Returns:
+///   0 = Reconnection triggered
+///   1 = Reconnection already in progress
+///   2 = No session initialized (nothing to reconnect)
+int32_t spotifly_force_reconnect(void);
 
 /// Callback function type for context loaded notifications.
 /// Receives a JSON string containing context_uri, current track, next tracks, and previous tracks.

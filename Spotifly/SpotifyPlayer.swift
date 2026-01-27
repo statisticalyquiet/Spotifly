@@ -745,6 +745,15 @@ enum SpotifyPlayer {
         spotifly_is_session_connected() == 1
     }
 
+    /// Forces a reconnection to Spotify servers.
+    /// Use this after system wake to ensure a fresh connection before playback.
+    /// Returns true if reconnection was triggered, false if already reconnecting or no session.
+    @discardableResult
+    static func forceReconnect() -> Bool {
+        let result = spotifly_force_reconnect()
+        return result == 0
+    }
+
     /// Returns a publisher for connection state updates.
     /// Subscribe to this to update the connection status dashboard.
     static var connectionState: AnyPublisher<LibrespotConnectionState?, Never> {
@@ -845,6 +854,12 @@ enum SpotifyPlayer {
         spotifly_pause()
     }
 
+    /// Clears any buffered audio samples.
+    /// Call this before sleep to prevent stale audio playing on wake.
+    static func clearAudioBuffer() {
+        spotifly_clear_audio_buffer()
+    }
+
     /// Resumes playback.
     static func resume() {
         spotifly_resume()
@@ -859,6 +874,13 @@ enum SpotifyPlayer {
     /// Call this when the app is quitting to properly disconnect from Spotify Connect.
     static func shutdown() {
         spotifly_shutdown()
+    }
+
+    /// Disconnects from Spotify Connect without preventing future reconnection.
+    /// Use this before system sleep - the device disappears from Spotify immediately,
+    /// but forceReconnect() can still bring it back on wake.
+    static func disconnect() {
+        spotifly_disconnect()
     }
 
     /// Returns whether the player is currently playing.

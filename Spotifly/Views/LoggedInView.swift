@@ -177,6 +177,21 @@ struct LoggedInView: View {
                 await deviceService.loadDevices(accessToken: token)
             }
         }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)) { _ in
+            // Disconnect from Spotify Connect before sleep so the device disappears immediately.
+            // This is better than pause because a paused device still appears "active" in Spotify
+            // but can't respond to commands while the Mac is asleep. Spotify remembers playback
+            // position server-side, so clicking play after wake resumes where we left off.
+            // disconnect() internally pauses playback and clears the audio buffer synchronously.
+            debugLog("LoggedInView", "System will sleep, disconnecting from Spotify")
+            SpotifyPlayer.disconnect()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            // After system wake, the TCP connection to Spotify servers is likely dead.
+            // Force a reconnection now so playback works reliably when user clicks play.
+            debugLog("LoggedInView", "System wake detected, forcing reconnection")
+            SpotifyPlayer.forceReconnect()
+        }
         .onChange(of: navigationCoordinator.pendingNavigationItem) { _, newValue in
             if let pendingItem = newValue {
                 selectedNavigationItem = pendingItem

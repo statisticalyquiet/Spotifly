@@ -27,6 +27,10 @@ enum AudioCommand {
     Start,
     /// Pause playback (keep stream alive)
     Stop,
+    /// Clear all buffered audio (flush stale samples)
+    Clear,
+    /// Clear with acknowledgment (for synchronous clearing)
+    ClearSync(std::sync::mpsc::SyncSender<()>),
     /// Shutdown the audio thread completely
     Shutdown,
 }
@@ -171,6 +175,15 @@ fn audio_thread_main(rx: Receiver<AudioCommand>) {
                 debug!("ProxySink: Stop command received");
                 sink.pause();
             }
+            Ok(AudioCommand::Clear) => {
+                debug!("ProxySink: Clear command received, flushing {} buffered sources", sink.len());
+                sink.clear();
+            }
+            Ok(AudioCommand::ClearSync(ack_tx)) => {
+                debug!("ProxySink: ClearSync command received, flushing {} buffered sources", sink.len());
+                sink.clear();
+                let _ = ack_tx.send(()); // Acknowledge completion
+            }
             Ok(AudioCommand::Shutdown) => {
                 info!("ProxySink: Shutdown command received");
                 break;
@@ -211,6 +224,48 @@ impl ProxySink {
             debug!("ProxySink: Sending shutdown command");
             let _ = state.command_tx.send(AudioCommand::Shutdown);
             // Thread will exit when it processes the shutdown command
+        }
+    }
+
+    /// Clear all buffered audio samples (async, non-blocking).
+    /// Uses try_send to avoid blocking the main thread.
+    #[allow(dead_code)]
+    pub fn clear_buffer() {
+        let guard = AUDIO_THREAD.lock().unwrap();
+        if let Some(state) = guard.as_ref() {
+            debug!("ProxySink: Sending clear command");
+            match state.command_tx.try_send(AudioCommand::Clear) {
+                Ok(_) => {}
+                Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                    debug!("ProxySink: Clear command dropped (channel full)");
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    debug!("ProxySink: Clear command dropped (channel disconnected)");
+                }
+            }
+        }
+    }
+
+    /// Clear all buffered audio samples synchronously.
+    /// Blocks until the audio thread has processed the clear command.
+    /// Use this before sleep to ensure no stale audio plays on wake.
+    pub fn clear_buffer_sync() {
+        let guard = AUDIO_THREAD.lock().unwrap();
+        if let Some(state) = guard.as_ref() {
+            debug!("ProxySink: Sending synchronous clear command");
+            let (ack_tx, ack_rx) = mpsc::sync_channel::<()>(1);
+            match state.command_tx.send(AudioCommand::ClearSync(ack_tx)) {
+                Ok(_) => {
+                    // Wait for acknowledgment with timeout
+                    match ack_rx.recv_timeout(Duration::from_millis(500)) {
+                        Ok(_) => debug!("ProxySink: Clear completed"),
+                        Err(_) => debug!("ProxySink: Clear acknowledgment timed out"),
+                    }
+                }
+                Err(_) => {
+                    debug!("ProxySink: Clear command failed (channel disconnected)");
+                }
+            }
         }
     }
 }

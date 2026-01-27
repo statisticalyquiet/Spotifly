@@ -277,6 +277,11 @@ final class PlaybackViewModel {
 
     func next() {
         if SpotifyPlayer.isActiveDevice {
+            // During reconnection, session may not be fully connected yet
+            guard SpotifyPlayer.isSessionConnected else {
+                debugLog("PlaybackViewModel", "next() ignored - session not connected yet")
+                return
+            }
             do {
                 try SpotifyPlayer.next()
             } catch {
@@ -303,6 +308,11 @@ final class PlaybackViewModel {
 
     func previous() {
         if SpotifyPlayer.isActiveDevice {
+            // During reconnection, session may not be fully connected yet
+            guard SpotifyPlayer.isSessionConnected else {
+                debugLog("PlaybackViewModel", "previous() ignored - session not connected yet")
+                return
+            }
             do {
                 try SpotifyPlayer.previous()
             } catch {
@@ -340,6 +350,11 @@ final class PlaybackViewModel {
 
     func pause() {
         if SpotifyPlayer.isActiveDevice {
+            // During reconnection, session may not be fully connected yet
+            guard SpotifyPlayer.isSessionConnected else {
+                debugLog("PlaybackViewModel", "pause() ignored - session not connected yet")
+                return
+            }
             SpotifyPlayer.pause()
         } else {
             // Remote control via Web API
@@ -357,6 +372,11 @@ final class PlaybackViewModel {
 
     func resume() {
         if SpotifyPlayer.isActiveDevice {
+            // During reconnection, session may not be fully connected yet
+            guard SpotifyPlayer.isSessionConnected else {
+                debugLog("PlaybackViewModel", "resume() ignored - session not connected yet")
+                return
+            }
             SpotifyPlayer.resume()
         } else {
             // Remote control via Web API
@@ -414,6 +434,11 @@ final class PlaybackViewModel {
         commandCenter.playCommand.addTarget { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                // During reconnection, session may not be fully connected yet
+                guard SpotifyPlayer.isSessionConnected else {
+                    debugLog("PlaybackViewModel", "Media key play ignored - session not connected yet")
+                    return
+                }
                 if !self.isPlaying {
                     SpotifyPlayer.resume()
                     // Keep current position anchor, just update time
@@ -429,6 +454,11 @@ final class PlaybackViewModel {
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                // During reconnection, session may not be fully connected yet
+                guard SpotifyPlayer.isSessionConnected else {
+                    debugLog("PlaybackViewModel", "Media key pause ignored - session not connected yet")
+                    return
+                }
                 if self.isPlaying {
                     SpotifyPlayer.pause()
                     self.isPlaying = false
@@ -442,6 +472,11 @@ final class PlaybackViewModel {
         commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                // During reconnection, session may not be fully connected yet
+                guard SpotifyPlayer.isSessionConnected else {
+                    debugLog("PlaybackViewModel", "Media key toggle ignored - session not connected yet")
+                    return
+                }
                 if self.isPlaying {
                     SpotifyPlayer.pause()
                     self.isPlaying = false
