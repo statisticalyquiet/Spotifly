@@ -19,13 +19,17 @@ final class QueueService {
     private var setQueueSubscription: AnyCancellable?
     private var metadataFetchTask: Task<Void, Never>?
     private var pendingTrackIds: Set<String> = []
-    private var debounceTask: Task<Void, Never>?
+    /// Subject for debouncing metadata fetch requests
+    private let fetchSubject = PassthroughSubject<Void, Never>()
+    /// Subscription for debounced fetch operations
+    private var fetchDebounceSubscription: AnyCancellable?
 
     init(store: AppStore, tokenProvider: @escaping () async -> String) {
         self.store = store
         self.tokenProvider = tokenProvider
         setupQueueSubscription()
         setupSetQueueSubscription()
+        setupFetchDebounceSubscription()
     }
 
     // MARK: - Queue Subscriptions
@@ -132,16 +136,20 @@ final class QueueService {
         // Accumulate track IDs and debounce the fetch
         pendingTrackIds.formUnion(trackIdsToFetch)
 
-        // Cancel previous debounce timer (not the fetch itself)
-        debounceTask?.cancel()
+        // Signal the debounced fetch
+        fetchSubject.send()
+    }
 
-        debounceTask = Task { [weak self] in
-            // Wait for rapid updates to settle
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled else { return }
-
-            await self?.executeFetch()
-        }
+    /// Subscribe to debounced fetch requests
+    /// Debounces rapid queue updates to avoid cancelling in-flight metadata fetches
+    private func setupFetchDebounceSubscription() {
+        fetchDebounceSubscription = fetchSubject
+            .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
+            .sink { [weak self] in
+                Task { @MainActor in
+                    await self?.executeFetch()
+                }
+            }
     }
 
     /// Execute the actual fetch for accumulated track IDs
