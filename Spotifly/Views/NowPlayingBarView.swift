@@ -5,6 +5,7 @@
 //  Persistent now playing bar at the bottom of the window
 //
 
+import AppKit
 import SwiftUI
 
 struct NowPlayingBarView: View {
@@ -78,7 +79,19 @@ struct NowPlayingBarView: View {
             VStack(spacing: 4) {
                 // Top row: Cover | Title & Artist | Menu
                 HStack(spacing: 10) {
-                    albumArt(size: 34)
+                    Button {
+                        navigationCoordinator.navigateToQueue()
+                    } label: {
+                        albumArt(size: 34)
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        if hovering {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
 
                     trackInfo
                         .frame(maxWidth: .infinity, alignment: .leading)
