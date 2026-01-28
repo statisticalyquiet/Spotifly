@@ -50,7 +50,7 @@ extension SpotifyAPI {
 
     /// Fetches user's saved albums from Spotify Web API
     static func fetchUserAlbums(accessToken: String, limit: Int = 50, offset: Int = 0) async throws -> AlbumsResponse {
-        let urlString = "\(baseURL)/me/albums?limit=\(limit)&offset=\(offset)&fields=items(album(id,name,uri,total_tracks,release_date,album_type,artists(name),images,tracks(items(duration_ms)),external_urls(spotify))),total,next"
+        let urlString = "\(baseURL)/me/albums?limit=\(limit)&offset=\(offset)&fields=items(album(id,name,uri,total_tracks,release_date,album_type,artists(id,name),images,tracks(items(duration_ms)),external_urls(spotify))),total,next"
 
         debugLog("SpotifyAPI", "[GET] \(urlString)")
 
