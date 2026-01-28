@@ -20,6 +20,7 @@ struct NowPlayingBarView: View {
     @State private var cachedAlbumArtImage: Image?
     @State private var cachedAlbumArtURL: String?
     @State private var showVolumePopover = false
+    @State private var showAlbumArtMenu = false
     @State private var isHoveringSeekBar = false
     @State private var showNewPlaylistDialog = false
     @State private var newPlaylistName = ""
@@ -80,7 +81,7 @@ struct NowPlayingBarView: View {
                 // Top row: Cover | Title & Artist | Menu
                 HStack(spacing: 10) {
                     Button {
-                        navigationCoordinator.navigateToQueue()
+                        showAlbumArtMenu.toggle()
                     } label: {
                         albumArt(size: 34)
                     }
@@ -91,6 +92,47 @@ struct NowPlayingBarView: View {
                         } else {
                             NSCursor.pop()
                         }
+                    }
+                    .popover(isPresented: $showAlbumArtMenu, arrowEdge: .top) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            if let artistId = currentTrack?.artistId {
+                                Button {
+                                    showAlbumArtMenu = false
+                                    navigationCoordinator.navigateToArtist(artistId: artistId)
+                                } label: {
+                                    Label("track.menu.go_to_artist", systemImage: "person.circle")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                            }
+
+                            if let albumId = currentTrack?.albumId {
+                                Button {
+                                    showAlbumArtMenu = false
+                                    navigationCoordinator.navigateToAlbum(albumId: albumId)
+                                } label: {
+                                    Label("track.menu.go_to_album", systemImage: "square.stack")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                            }
+
+                            Button {
+                                showAlbumArtMenu = false
+                                navigationCoordinator.navigateToQueue()
+                            } label: {
+                                Label("queue.title", systemImage: "list.number")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                        }
+                        .padding(.vertical, 4)
                     }
 
                     trackInfo
