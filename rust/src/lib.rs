@@ -271,6 +271,19 @@ fn parse_spotify_uri(uri_str: &str) -> Result<SpotifyUri, String> {
     SpotifyUri::from_uri(uri_str).map_err(|e| format!("Invalid Spotify URI: {:?}", e))
 }
 
+/// Shuts down the Spirc instance if it exists.
+/// This terminates the spirc_task and closes the dealer connection.
+fn shutdown_spirc(context: &str) {
+    let spirc_guard = SPIRC.lock().unwrap();
+    if let Some(spirc) = spirc_guard.as_ref() {
+        if let Err(e) = spirc.shutdown() {
+            debug!("{}: spirc.shutdown() failed: {:?}", context, e);
+        } else {
+            debug!("{}: spirc.shutdown() succeeded", context);
+        }
+    }
+}
+
 /// Frees a C string allocated by this library.
 #[no_mangle]
 pub extern "C" fn spotifly_free_string(s: *mut c_char) {
@@ -674,7 +687,12 @@ fn do_reconnect_cleanup() {
         }
     }
 
-    // Clear Spirc first (it holds references to player and session)
+    // Shutdown Spirc first - this terminates the spirc_task and closes the dealer,
+    // which will cause the cluster listener stream to end. Without this, old tasks
+    // remain alive holding references to Session/Player until the server closes the connection.
+    shutdown_spirc("do_reconnect_cleanup");
+
+    // Now clear Spirc reference
     {
         let mut spirc_guard = SPIRC.lock().unwrap();
         *spirc_guard = None;
@@ -1949,7 +1967,10 @@ pub extern "C" fn spotifly_cleanup() {
         }
     }
 
-    // Clear Spirc first (it holds references to player and session)
+    // Shutdown Spirc first - this terminates the spirc_task and closes the dealer
+    shutdown_spirc("spotifly_cleanup");
+
+    // Now clear Spirc reference
     {
         let mut spirc_guard = SPIRC.lock().unwrap();
         *spirc_guard = None;
