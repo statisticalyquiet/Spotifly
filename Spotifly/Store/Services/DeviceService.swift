@@ -67,29 +67,22 @@ final class DeviceService {
         // Check if target is our local device
         let isLocalDevice = device.id == store.connection?.deviceId
 
-        do {
-            if isLocalDevice {
-                // Transfer TO local - use Spirc's native transfer
-                try SpotifyPlayer.transferToLocal()
-            } else {
-                // Transfer FROM local to remote device
-                try SpotifyPlayer.transferPlayback(to: device.id)
-            }
-
-            // Schedule a delayed refresh to confirm the state
-            // (Web API returns stale data immediately after transfer)
-            Task {
-                try? await Task.sleep(for: .milliseconds(750))
-                await loadDevices(accessToken: accessToken)
-            }
-
-            return true
-        } catch {
-            // Revert optimistic update on failure by refreshing from API
-            await loadDevices(accessToken: accessToken)
-            store.devicesErrorMessage = String(localized: "speakers.error.failed_to_transfer")
-            return false
+        if isLocalDevice {
+            // Transfer TO local - use Spirc's native transfer
+            SpotifyPlayer.transferToLocal()
+        } else {
+            // Transfer FROM local to remote device
+            SpotifyPlayer.transferPlayback(to: device.id)
         }
+
+        // Schedule a delayed refresh to confirm the state
+        // (Web API returns stale data immediately after transfer)
+        Task {
+            try? await Task.sleep(for: .milliseconds(750))
+            await loadDevices(accessToken: accessToken)
+        }
+
+        return true
     }
 
     // MARK: - Helpers

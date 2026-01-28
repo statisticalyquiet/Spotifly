@@ -134,15 +134,11 @@ struct TrackContextMenu: View {
 
     private func startSongRadio() {
         Task {
-            do {
-                let token = await session.validAccessToken()
-                await playbackViewModel.initializeIfNeeded(accessToken: token)
-                try SpotifyPlayer.playRadio(trackUri: track.uri)
-                onNavigate?()
-                navigationCoordinator.navigateToQueue()
-            } catch {
-                playbackViewModel.errorMessage = "Failed to start radio: \(error.localizedDescription)"
-            }
+            let token = await session.validAccessToken()
+            await playbackViewModel.initializeIfNeeded(accessToken: token)
+            SpotifyPlayer.playRadio(trackUri: track.uri)
+            onNavigate?()
+            navigationCoordinator.navigateToQueue()
         }
     }
 

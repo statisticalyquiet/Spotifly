@@ -222,13 +222,9 @@ final class PlaybackViewModel {
 
         errorMessage = nil
 
-        do {
-            // Use Spirc to add to queue directly via librespot
-            try SpotifyPlayer.addToQueue(uri: uri)
-            // Queue update will come via Mercury callback
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        // Use Spirc to add to queue directly via librespot
+        SpotifyPlayer.addToQueue(uri: uri)
+        // Queue update will come via Mercury callback
     }
 
     // MARK: - Playback State Helpers
@@ -282,12 +278,7 @@ final class PlaybackViewModel {
                 debugLog("PlaybackViewModel", "next() ignored - session not connected yet")
                 return
             }
-            do {
-                try SpotifyPlayer.next()
-            } catch {
-                errorMessage = error.localizedDescription
-                return
-            }
+            SpotifyPlayer.next()
         } else {
             // Remote control via Web API
             Task {
@@ -313,12 +304,7 @@ final class PlaybackViewModel {
                 debugLog("PlaybackViewModel", "previous() ignored - session not connected yet")
                 return
             }
-            do {
-                try SpotifyPlayer.previous()
-            } catch {
-                errorMessage = error.localizedDescription
-                return
-            }
+            SpotifyPlayer.previous()
         } else {
             // Remote control via Web API
             Task {
@@ -650,11 +636,7 @@ final class PlaybackViewModel {
     /// Perform the actual seek operation (called after debouncing)
     private func performSeek(to positionMs: UInt32) {
         if SpotifyPlayer.isActiveDevice {
-            do {
-                try SpotifyPlayer.seek(positionMs: positionMs)
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+            SpotifyPlayer.seek(positionMs: positionMs)
         } else {
             // Remote control via Web API
             Task {

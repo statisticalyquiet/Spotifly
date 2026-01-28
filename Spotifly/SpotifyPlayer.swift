@@ -850,37 +850,55 @@ enum SpotifyPlayer {
     }
 
     /// Pauses playback.
+    /// Dispatched to background thread to avoid blocking the main thread on Spirc mutex.
     static func pause() {
-        spotifly_pause()
+        Task.detached(priority: .userInitiated) {
+            spotifly_pause()
+        }
     }
 
     /// Clears any buffered audio samples.
     /// Call this before sleep to prevent stale audio playing on wake.
+    /// Dispatched to background thread as this explicitly blocks until buffer is flushed.
     static func clearAudioBuffer() {
-        spotifly_clear_audio_buffer()
+        Task.detached(priority: .userInitiated) {
+            spotifly_clear_audio_buffer()
+        }
     }
 
     /// Resumes playback.
+    /// Dispatched to background thread to avoid blocking the main thread on Spirc mutex.
     static func resume() {
-        spotifly_resume()
+        Task.detached(priority: .userInitiated) {
+            spotifly_resume()
+        }
     }
 
     /// Stops playback.
+    /// Dispatched to background thread to avoid blocking the main thread on Spirc mutex.
     static func stop() {
-        spotifly_stop()
+        Task.detached(priority: .userInitiated) {
+            spotifly_stop()
+        }
     }
 
     /// Shuts down the Spirc connection and sends goodbye to other devices.
     /// Call this when the app is quitting to properly disconnect from Spotify Connect.
+    /// Dispatched to background thread to avoid blocking the main thread.
     static func shutdown() {
-        spotifly_shutdown()
+        Task.detached(priority: .userInitiated) {
+            spotifly_shutdown()
+        }
     }
 
     /// Disconnects from Spotify Connect without preventing future reconnection.
     /// Use this before system sleep - the device disappears from Spotify immediately,
     /// but forceReconnect() can still bring it back on wake.
+    /// Dispatched to background thread to avoid blocking the main thread.
     static func disconnect() {
-        spotifly_disconnect()
+        Task.detached(priority: .userInitiated) {
+            spotifly_disconnect()
+        }
     }
 
     /// Returns whether the player is currently playing.
@@ -906,75 +924,81 @@ enum SpotifyPlayer {
     }
 
     /// Skips to the next track in the queue.
-    static func next() throws {
-        let result = spotifly_next()
-        guard result == 0 else {
-            throw SpotifyPlayerError.playbackFailed
+    /// Dispatched to background thread to avoid blocking the main thread on Spirc mutex.
+    /// State updates come back via Mercury callback.
+    static func next() {
+        Task.detached(priority: .userInitiated) {
+            spotifly_next()
         }
     }
 
     /// Skips to the previous track in the queue.
-    static func previous() throws {
-        let result = spotifly_previous()
-        guard result == 0 else {
-            throw SpotifyPlayerError.playbackFailed
+    /// Dispatched to background thread to avoid blocking the main thread on Spirc mutex.
+    /// State updates come back via Mercury callback.
+    static func previous() {
+        Task.detached(priority: .userInitiated) {
+            spotifly_previous()
         }
     }
 
     /// Seeks to the given position in milliseconds.
-    static func seek(positionMs: UInt32) throws {
-        let result = spotifly_seek(positionMs)
-        guard result == 0 else {
-            throw SpotifyPlayerError.playbackFailed
+    /// Dispatched to background thread to avoid blocking the main thread on Spirc mutex.
+    /// State updates come back via Mercury callback.
+    static func seek(positionMs: UInt32) {
+        Task.detached(priority: .userInitiated) {
+            spotifly_seek(positionMs)
         }
     }
 
     /// Sets the playback volume (0.0 - 1.0).
+    /// Dispatched to background thread to avoid blocking the main thread on Spirc mutex.
     static func setVolume(_ volume: Double) {
         let volumeU16 = UInt16(max(0, min(1, volume)) * 65535.0)
-        spotifly_set_volume(volumeU16)
+        Task.detached(priority: .userInitiated) {
+            spotifly_set_volume(volumeU16)
+        }
     }
 
     /// Plays radio for a seed track.
+    /// Dispatched to background thread as this blocks on a network request.
     /// - Parameter trackUri: The Spotify track URI to use as seed
-    static func playRadio(trackUri: String) throws {
-        let result = trackUri.withCString { ptr in
-            spotifly_play_radio(ptr)
-        }
-        guard result == 0 else {
-            throw SpotifyPlayerError.playbackFailed
+    static func playRadio(trackUri: String) {
+        Task.detached(priority: .userInitiated) {
+            _ = trackUri.withCString { ptr in
+                spotifly_play_radio(ptr)
+            }
         }
     }
 
     /// Transfers playback from another Spotify Connect device to this local player.
     /// Uses the native Spotify Connect protocol via Spirc for seamless handoff.
-    static func transferToLocal() throws {
-        let result = spotifly_transfer_to_local()
-        guard result == 0 else {
-            throw SpotifyPlayerError.playbackFailed
+    /// Dispatched to background thread to avoid blocking the main thread.
+    static func transferToLocal() {
+        Task.detached(priority: .userInitiated) {
+            spotifly_transfer_to_local()
         }
     }
 
     /// Transfers playback from this local player to another device.
     /// Uses the native Spotify Connect protocol via SpClient for seamless handoff.
+    /// Dispatched to background thread to avoid blocking the main thread.
     /// - Parameter deviceId: The target device ID to transfer playback to
-    static func transferPlayback(to deviceId: String) throws {
-        let result = deviceId.withCString { ptr in
-            spotifly_transfer_playback(ptr)
-        }
-        guard result == 0 else {
-            throw SpotifyPlayerError.playbackFailed
+    static func transferPlayback(to deviceId: String) {
+        Task.detached(priority: .userInitiated) {
+            _ = deviceId.withCString { ptr in
+                spotifly_transfer_playback(ptr)
+            }
         }
     }
 
     /// Adds an item to the queue via Spirc.
+    /// Dispatched to background thread to avoid blocking the main thread.
     /// - Parameter uri: The Spotify URI to add to the queue (track, episode, etc.)
-    static func addToQueue(uri: String) throws {
-        let result = uri.withCString { ptr in
-            spotifly_add_to_queue(ptr)
-        }
-        guard result == 0 else {
-            throw SpotifyPlayerError.playbackFailed
+    static func addToQueue(uri: String) {
+        Task.detached(priority: .userInitiated) {
+            _ = uri.withCString { ptr in
+                spotifly_add_to_queue(ptr)
+            }
         }
     }
 
