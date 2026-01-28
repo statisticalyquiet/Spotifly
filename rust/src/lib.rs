@@ -1039,15 +1039,23 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 drop(cb_guard);
                                 let notification = SetQueueNotification {
                                     context_uri,
-                                    current_track: current_track
-                                        .map(|(uri, provider)| QueueTrackInfo { uri, provider }),
+                                    current_track: current_track.map(|t| QueueTrackInfo {
+                                        uri: t.uri,
+                                        provider: t.provider,
+                                    }),
                                     next_tracks: next_tracks
                                         .into_iter()
-                                        .map(|(uri, provider)| QueueTrackInfo { uri, provider })
+                                        .map(|t| QueueTrackInfo {
+                                            uri: t.uri,
+                                            provider: t.provider,
+                                        })
                                         .collect(),
                                     prev_tracks: prev_tracks
                                         .into_iter()
-                                        .map(|(uri, provider)| QueueTrackInfo { uri, provider })
+                                        .map(|t| QueueTrackInfo {
+                                            uri: t.uri,
+                                            provider: t.provider,
+                                        })
                                         .collect(),
                                 };
                                 if let Ok(json) = serde_json::to_string(&notification) {
