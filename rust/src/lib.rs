@@ -1301,36 +1301,25 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
             // Small delay to let librespot's initial cluster processing complete
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-            // Determine if we should activate:
-            // - Reconnect: re-activate if we were previously active (restore server-side status)
-            // - Fresh start: always activate to become the active device
+            // Always activate after connection - whether fresh start or reconnect.
+            // Staying passive after reconnect can leave the app in a stuck state where
+            // no device is active and Web API returns 204.
             let is_reconnect = RECONNECTING.load(Ordering::SeqCst);
-            let should_activate = if is_reconnect {
-                // Re-activate if we were active before the disconnect
-                IS_ACTIVE_DEVICE.load(Ordering::SeqCst)
+            if is_reconnect {
+                debug!("Reconnect: activating to restore active status");
             } else {
-                // Fresh start: always activate
-                true
-            };
+                debug!("Fresh start: activating Spotifly via transfer");
+            }
 
-            if should_activate {
-                if is_reconnect {
-                    debug!("Reconnect: re-activating to restore server-side active status");
-                } else {
-                    debug!("Fresh start: activating Spotifly via transfer");
+            // Use transfer(None) to become the active device
+            match spirc_for_activation.transfer(None) {
+                Ok(_) => {
+                    debug!("Auto-activation via transfer succeeded");
+                    IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
                 }
-                // Use transfer(None) to become the active device
-                match spirc_for_activation.transfer(None) {
-                    Ok(_) => {
-                        debug!("Auto-activation via transfer succeeded");
-                        IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
-                    }
-                    Err(e) => {
-                        debug!("Auto-activation via transfer failed: {:?}", e);
-                    }
+                Err(e) => {
+                    debug!("Auto-activation via transfer failed: {:?}", e);
                 }
-            } else {
-                debug!("Reconnect: was not active before, staying passive");
             }
 
             // Notify Swift that we're connected (Spirc is ready)
