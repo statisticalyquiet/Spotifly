@@ -76,6 +76,10 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 // Flag to track sleep state (prevents auto-reconnect, but allows explicit forceReconnect on wake)
 static SLEEPING: AtomicBool = AtomicBool::new(false);
 
+// Auto-resume after reconnection: if non-zero, resume playback when Paused event arrives before this timestamp
+// This handles the case where we were playing before a network disconnect, reconnected, but track loaded paused
+static RESUME_AFTER_RECONNECT_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
+
 // Session state tracking - guards playback commands until session is ready
 struct SessionConnectionState {
     connection_id: Option<String>,
@@ -495,6 +499,10 @@ fn spawn_reconnection_loop() {
     debug!("[WAKE +{}ms] spawn_reconnection_loop started", elapsed_since_wake_ms());
 
     RUNTIME.spawn(async {
+        // Capture playing state BEFORE any cleanup - we'll use this to auto-resume after reconnection
+        let was_playing = IS_PLAYING.load(Ordering::SeqCst);
+        debug!("[WAKE +{}ms] Captured was_playing={} before reconnection", elapsed_since_wake_ms(), was_playing);
+
         // Backoff delays in seconds: immediate, then 2, 5, 10, then 30s intervals
         let delays = [0u64, 2, 5, 10, 30, 30, 30, 30, 30, 30];
 
@@ -554,6 +562,16 @@ fn spawn_reconnection_loop() {
                 Ok(_) => {
                     debug!("[WAKE +{}ms] Reconnection successful on attempt {}", elapsed_since_wake_ms(), attempt + 1);
                     RECONNECTING.store(false, Ordering::SeqCst);
+
+                    // If we were playing before disconnect, set up auto-resume
+                    // The track will load paused (Spotify's transfer state has is_paused=true)
+                    // When we receive the Paused event, we'll auto-resume if within this window
+                    if was_playing {
+                        let resume_until = current_timestamp_ms() + 5000; // 5 second window
+                        RESUME_AFTER_RECONNECT_UNTIL_MS.store(resume_until, Ordering::SeqCst);
+                        debug!("[WAKE +{}ms] Will auto-resume after track loads (was playing before disconnect)", elapsed_since_wake_ms());
+                    }
+
                     // SessionConnected event will reset RECONNECT_ATTEMPT and notify
                     return;
                 }
@@ -865,6 +883,8 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                             debug!("PlayerEvent::Playing at {}ms", position_ms);
                             IS_PLAYING.store(true, Ordering::SeqCst);
                             IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                            // Clear auto-resume flag - we're already playing
+                            RESUME_AFTER_RECONNECT_UNTIL_MS.store(0, Ordering::SeqCst);
                             update_position(position_ms);
                             // Send playback state update to Swift
                             send_local_playback_state(true, position_ms);
@@ -876,6 +896,27 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                             update_position(position_ms);
                             // Send playback state update to Swift
                             send_local_playback_state(false, position_ms);
+
+                            // Auto-resume after reconnection if we were playing before disconnect
+                            let resume_until = RESUME_AFTER_RECONNECT_UNTIL_MS.load(Ordering::SeqCst);
+                            if resume_until > 0 && current_timestamp_ms() < resume_until {
+                                // Clear the flag first to prevent multiple resume attempts
+                                RESUME_AFTER_RECONNECT_UNTIL_MS.store(0, Ordering::SeqCst);
+                                debug!("[WAKE +{}ms] Auto-resuming playback after reconnection", elapsed_since_wake_ms());
+
+                                let spirc_guard = SPIRC.lock().unwrap();
+                                if let Some(spirc) = spirc_guard.as_ref() {
+                                    match spirc.play() {
+                                        Ok(_) => {
+                                            IS_PLAYING.store(true, Ordering::SeqCst);
+                                            debug!("[WAKE +{}ms] Auto-resume succeeded", elapsed_since_wake_ms());
+                                        }
+                                        Err(e) => {
+                                            debug!("[WAKE +{}ms] Auto-resume failed: {:?}", elapsed_since_wake_ms(), e);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         Some(PlayerEvent::PositionChanged { position_ms, .. }) => {
                             // Periodic position update (every 200ms)
