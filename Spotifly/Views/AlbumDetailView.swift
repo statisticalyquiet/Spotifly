@@ -139,9 +139,27 @@ struct AlbumDetailView: View {
                             .fontWeight(.semibold)
                             .multilineTextAlignment(.center)
 
-                        Text(album.artistName)
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
+                        if let artistId = album.artistId {
+                            Button {
+                                navigationCoordinator.navigateToArtist(artistId: artistId)
+                            } label: {
+                                Text(album.artistName)
+                                    .font(.title3)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .onHover { hovering in
+                                if hovering {
+                                    NSCursor.pointingHand.push()
+                                } else {
+                                    NSCursor.pop()
+                                }
+                            }
+                        } else {
+                            Text(album.artistName)
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                        }
 
                         HStack(spacing: 4) {
                             Text(String(format: String(localized: "metadata.tracks"), album.trackCount))
