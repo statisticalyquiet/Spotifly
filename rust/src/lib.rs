@@ -10,7 +10,7 @@ use librespot_core::SpotifyUri;
 use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
 use librespot_playback::mixer::softmixer::SoftMixer;
 use librespot_playback::mixer::{Mixer, MixerConfig};
-use librespot_playback::player::{Player, PlayerEvent};
+use librespot_playback::player::{OptInPlayerEvents, Player, PlayerEvent};
 use proxy_sink::mk_proxy_sink;
 use librespot_protocol::connect::ClusterUpdate;
 use librespot_protocol::player::PlayerState;
@@ -877,8 +877,9 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
     // tightly coupled to Session's ChannelManager for decryption key requests
     let player = create_new_player(&session, &mixer)?;
 
-    // Get event channel from player
-    let mut event_channel = player.get_player_event_channel();
+    // Get event channel from player, opting in to SetQueue events
+    let opt_in_events = OptInPlayerEvents { set_queue: true };
+    let mut event_channel = player.get_player_event_channel_with(opt_in_events);
 
     // Create channel for stopping event listener
     let (tx, mut rx) = mpsc::unbounded_channel::<()>();
