@@ -121,6 +121,8 @@ private struct UptimeDisplay: View {
 /// Main dashboard showing librespot connection status
 struct ConnectionStatusView: View {
     @Environment(AppStore.self) private var store
+    var onReconnect: (@Sendable () async -> Void)?
+    @State private var isReconnecting = false
 
     var body: some View {
         if let connection = store.connection {
@@ -184,6 +186,32 @@ struct ConnectionStatusView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                // Reconnect button
+                if let onReconnect {
+                    Divider()
+                    Button {
+                        isReconnecting = true
+                        Task {
+                            await onReconnect()
+                            isReconnecting = false
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isReconnecting {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            Text("Reconnect")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isReconnecting)
                 }
             }
             .padding()
