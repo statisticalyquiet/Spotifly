@@ -80,13 +80,13 @@ struct ArtistDetailView: View {
             await loadTopTracks()
             await loadAlbums()
         }
-        .alert("Unfollow Artist", isPresented: $showUnfollowConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Unfollow", role: .destructive) {
+        .alert("artist.unfollow.title", isPresented: $showUnfollowConfirmation) {
+            Button("action.cancel", role: .cancel) {}
+            Button("artist.unfollow.action", role: .destructive) {
                 unfollowArtist()
             }
         } message: {
-            Text("Are you sure you want to unfollow \"\(artist?.name ?? "")\"?")
+            Text("artist.unfollow.message \(artist?.name ?? "")")
         }
         .onReceive(NotificationCenter.default.publisher(for: .showArtistUnfollowConfirmation)) { notification in
             if let notificationArtistId = notification.object as? String, notificationArtistId == artistId {
@@ -215,9 +215,15 @@ struct ArtistDetailView: View {
                             Spacer()
 
                             if albums.count > 5 {
-                                Button(showAllAlbums ? "Show Less" : "Show All (\(albums.count))") {
+                                Button {
                                     withAnimation {
                                         showAllAlbums.toggle()
+                                    }
+                                } label: {
+                                    if showAllAlbums {
+                                        Text("artist.show_less")
+                                    } else {
+                                        Text("artist.show_all \(albums.count)")
                                     }
                                 }
                                 .font(.subheadline)
@@ -392,7 +398,7 @@ struct ArtistDetailView: View {
                 // Navigate away from the unfollowed artist
                 navigationCoordinator.clearArtistSelection()
             } catch {
-                errorMessage = "Failed to unfollow artist: \(error.localizedDescription)"
+                errorMessage = String(localized: "error.unfollow_artist \(error.localizedDescription)")
             }
         }
     }
@@ -406,7 +412,7 @@ struct ArtistDetailView: View {
                     accessToken: token,
                 )
             } catch {
-                errorMessage = "Failed to follow artist: \(error.localizedDescription)"
+                errorMessage = String(localized: "error.follow_artist \(error.localizedDescription)")
             }
         }
     }

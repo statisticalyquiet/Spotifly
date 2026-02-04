@@ -269,7 +269,7 @@ struct LoggedInView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("Refresh")
+                .help("menu.refresh")
             }
         }
         ToolbarItem(placement: .navigation) {
@@ -279,7 +279,7 @@ struct LoggedInView: View {
                 } label: {
                     Image(systemName: "arrow.down.to.line")
                 }
-                .help("Scroll to Current Track")
+                .help("queue.scroll_to_current")
             }
         }
         ToolbarItem(placement: .navigation) {
@@ -319,7 +319,7 @@ struct LoggedInView: View {
                     await playbackViewModel.addToQueue(uri: album.uri, accessToken: token)
                 }
             } label: {
-                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                Label("track.menu.play_next", systemImage: "text.line.first.and.arrowtriangle.forward")
             }
 
             Divider()
@@ -331,7 +331,7 @@ struct LoggedInView: View {
                     pasteboard.setString(externalUrl, forType: .string)
                 }
             } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
+                Label("action.share", systemImage: "square.and.arrow.up")
             }
             .disabled(album.externalUrl == nil)
 
@@ -339,7 +339,7 @@ struct LoggedInView: View {
                 Button {
                     navigationCoordinator.push(.artist(id: artistId))
                 } label: {
-                    Label("Go to Artist", systemImage: "person")
+                    Label("track.menu.go_to_artist", systemImage: "person")
                 }
             }
 
@@ -349,7 +349,7 @@ struct LoggedInView: View {
                 Button(role: .destructive) {
                     NotificationCenter.default.post(name: .showAlbumRemoveConfirmation, object: album.id)
                 } label: {
-                    Label("Remove from Library", systemImage: "minus.circle")
+                    Label("album.menu.remove_from_library", systemImage: "minus.circle")
                 }
             } else {
                 Button {
@@ -358,7 +358,7 @@ struct LoggedInView: View {
                         try? await albumService.saveAlbumToLibrary(albumId: album.id, accessToken: token)
                     }
                 } label: {
-                    Label("Add to Library", systemImage: "plus.circle")
+                    Label("album.menu.add_to_library", systemImage: "plus.circle")
                 }
             }
         } label: {
@@ -378,7 +378,7 @@ struct LoggedInView: View {
                     pasteboard.setString(externalUrl, forType: .string)
                 }
             } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
+                Label("action.share", systemImage: "square.and.arrow.up")
             }
             .disabled(artist.externalUrl == nil)
 
@@ -388,7 +388,7 @@ struct LoggedInView: View {
                 Button(role: .destructive) {
                     NotificationCenter.default.post(name: .showArtistUnfollowConfirmation, object: artist.id)
                 } label: {
-                    Label("Unfollow", systemImage: "person.badge.minus")
+                    Label("artist.menu.unfollow", systemImage: "person.badge.minus")
                 }
             } else {
                 Button {
@@ -397,7 +397,7 @@ struct LoggedInView: View {
                         try? await artistService.followArtist(artistId: artist.id, accessToken: token)
                     }
                 } label: {
-                    Label("Follow", systemImage: "person.badge.plus")
+                    Label("artist.menu.follow", systemImage: "person.badge.plus")
                 }
             }
         } label: {
@@ -417,7 +417,7 @@ struct LoggedInView: View {
                     await playbackViewModel.addToQueue(uri: playlist.uri, accessToken: token)
                 }
             } label: {
-                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                Label("track.menu.play_next", systemImage: "text.line.first.and.arrowtriangle.forward")
             }
 
             Divider()
@@ -429,7 +429,7 @@ struct LoggedInView: View {
                     pasteboard.setString(externalUrl, forType: .string)
                 }
             } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
+                Label("action.share", systemImage: "square.and.arrow.up")
             }
             .disabled(playlist.externalUrl == nil)
 
@@ -439,7 +439,7 @@ struct LoggedInView: View {
                 Button {
                     NotificationCenter.default.post(name: .showPlaylistEditDetails, object: playlist.id)
                 } label: {
-                    Label("Edit Details", systemImage: "pencil")
+                    Label("playlist.menu.edit_details", systemImage: "pencil")
                 }
 
                 Divider()
@@ -447,7 +447,7 @@ struct LoggedInView: View {
                 Button(role: .destructive) {
                     NotificationCenter.default.post(name: .showPlaylistDeleteConfirmation, object: playlist.id)
                 } label: {
-                    Label("Delete Playlist", systemImage: "trash")
+                    Label("playlist.menu.delete", systemImage: "trash")
                 }
             } else {
                 Divider()
@@ -456,7 +456,7 @@ struct LoggedInView: View {
                     Button(role: .destructive) {
                         NotificationCenter.default.post(name: .showPlaylistUnfollowConfirmation, object: playlist.id)
                     } label: {
-                        Label("Unfollow Playlist", systemImage: "minus.circle")
+                        Label("playlist.menu.unfollow", systemImage: "minus.circle")
                     }
                 } else {
                     Button {
@@ -465,7 +465,7 @@ struct LoggedInView: View {
                             try? await playlistService.followPlaylist(playlistId: playlist.id, accessToken: token)
                         }
                     } label: {
-                        Label("Follow Playlist", systemImage: "plus.circle")
+                        Label("playlist.menu.follow", systemImage: "plus.circle")
                     }
                 }
             }
