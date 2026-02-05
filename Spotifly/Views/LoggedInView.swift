@@ -77,6 +77,8 @@ struct LoggedInView: View {
         playbackViewModel.setStore(store)
     }
 
+    @AppStorage("topItemsTimeRange") private var topItemsTimeRange: String = TopItemsTimeRange.mediumTerm.rawValue
+
     @State private var selectedNavigationItem: NavigationItem? = .startpage
     @State private var searchText = ""
     @State private var searchFieldFocused = false
@@ -149,12 +151,14 @@ struct LoggedInView: View {
             // Load favorites so heart indicators work everywhere
             async let favorites: () = { try? await trackService.loadFavorites(accessToken: token) }()
 
-            // Load startpage data (top artists, new releases, recently played)
-            async let topArtists: () = topItemsService.loadTopArtists(accessToken: token)
+            // Load startpage data (top artists, top tracks, new releases, recently played)
+            let timeRange = TopItemsTimeRange(rawValue: topItemsTimeRange) ?? .mediumTerm
+            async let topArtists: () = topItemsService.loadTopArtists(accessToken: token, timeRange: timeRange)
+            async let topTracks: () = topItemsService.loadTopTracks(accessToken: token, timeRange: timeRange)
             async let newReleases: () = newReleasesService.loadNewReleases(accessToken: token)
             async let recentlyPlayed: () = recentlyPlayedService.loadRecentlyPlayed(accessToken: token)
 
-            _ = await (favorites, topArtists, newReleases, recentlyPlayed)
+            _ = await (favorites, topArtists, topTracks, newReleases, recentlyPlayed)
 
             // Set token provider for automatic reconnection
             playbackViewModel.setTokenProvider { await session.validAccessToken() }

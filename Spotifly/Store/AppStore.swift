@@ -99,12 +99,15 @@ final class AppStore {
     var recentlyPlayedErrorMessage: String?
     var hasLoadedRecentlyPlayed = false
 
-    // MARK: - Top Artists State
+    // MARK: - Top Items State
 
-    private(set) var topArtistIds: [String] = []
-    var topArtistsIsLoading = false
+    var topArtistIds: [String] = []
+    var topArtistsPagination = PaginationState()
     var topArtistsErrorMessage: String?
-    var hasLoadedTopArtists = false
+
+    var topTrackAlbumIds: [String] = []
+    var topTrackAlbumsPagination = PaginationState()
+    var topTrackAlbumsErrorMessage: String?
 
     // MARK: - New Releases State
 
@@ -163,6 +166,11 @@ final class AppStore {
     /// Top artists from the store
     var topArtists: [Artist] {
         topArtistIds.compactMap { artists[$0] }
+    }
+
+    /// Top albums derived from top tracks
+    var topTrackAlbums: [Album] {
+        topTrackAlbumIds.compactMap { albums[$0] }
     }
 
     /// New release albums from the store
@@ -509,12 +517,6 @@ final class AppStore {
         recentItemURIs = uris
     }
 
-    // MARK: - Top Items Actions
-
-    func setTopArtistIds(_ ids: [String]) {
-        topArtistIds = ids
-    }
-
     // MARK: - New Releases Actions
 
     func setNewReleaseAlbumIds(_ ids: [String]) {
@@ -592,6 +594,9 @@ final class AppStore {
                 let recentItemURIs: [String]
 
                 let topArtistIds: [String]
+                let topArtistsPagination: PaginationState
+                let topTrackAlbumIds: [String]
+                let topTrackAlbumsPagination: PaginationState
                 let newReleaseAlbumIds: [String]
 
                 let queue: QueueSnapshot
@@ -633,6 +638,9 @@ final class AppStore {
                 recentTrackIds: recentTrackIds,
                 recentItemURIs: recentItemURIs,
                 topArtistIds: topArtistIds,
+                topArtistsPagination: topArtistsPagination,
+                topTrackAlbumIds: topTrackAlbumIds,
+                topTrackAlbumsPagination: topTrackAlbumsPagination,
                 newReleaseAlbumIds: newReleaseAlbumIds,
                 queue: StoreSnapshot.QueueSnapshot(
                     previousTracks: queue.previousTracks.map { StoreSnapshot.QueueItemSnapshot(trackId: $0.trackId, provider: $0.provider.rawValue) },

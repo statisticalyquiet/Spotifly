@@ -115,6 +115,8 @@
 "startpage.top_artists.empty" = "Listen to more music to see your top artists";
 "startpage.new_releases" = "New Releases";
 "startpage.new_releases.empty" = "No new releases available";
+"startpage.top_albums" = "Your Top Albums";
+"startpage.top_albums.empty" = "Listen to more music to see your top albums";
 "startpage.empty" = "No sections enabled";
 "startpage.empty.description" = "Enable sections in Preferences → Startpage";
 
@@ -196,6 +198,10 @@
 /* Startpage Preferences */
 "preferences.startpage.sections" = "Sections";
 "preferences.startpage.none_enabled" = "The startpage will be empty. Enable at least one section to show content.";
+"preferences.top_items_time_range" = "Top Items Time Range";
+"preferences.time_range.short_term" = "Last 4 Weeks";
+"preferences.time_range.medium_term" = "Last 6 Months";
+"preferences.time_range.long_term" = "Last Year";
 
 /* Album Context Menu & Alerts */
 "album.menu.remove_from_library" = "Remove from Library";

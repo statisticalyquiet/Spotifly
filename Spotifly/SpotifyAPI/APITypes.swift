@@ -111,6 +111,14 @@ struct TopArtistsResponse: Sendable {
     let total: Int
 }
 
+/// Response wrapper for user's top tracks endpoint
+struct TopTracksResponse: Sendable {
+    let tracks: [APITrack]
+    let hasMore: Bool
+    let nextOffset: Int?
+    let total: Int
+}
+
 // MARK: - Playlist Types
 
 /// Playlist metadata from Spotify API
@@ -598,6 +606,13 @@ struct UserArtistsCodable: Decodable {
 /// Top artists
 struct TopArtistsCodable: Decodable {
     let items: [ArtistCodable]
+    let total: Int
+    let next: String?
+}
+
+/// Top tracks
+struct TopTracksCodable: Decodable {
+    let items: [TrackCodable]
     let total: Int
     let next: String?
 }
