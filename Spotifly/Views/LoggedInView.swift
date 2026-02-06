@@ -88,6 +88,14 @@ struct LoggedInView: View {
     @State private var selectedArtistId: String?
     @State private var selectedPlaylistId: String?
 
+    /// Blocking state shown instead of the main app
+    enum BlockingState {
+        case premiumRequired
+        case userNotWhitelisted
+    }
+
+    @State private var blockingState: BlockingState?
+
     // Sidebar width for dynamic now playing bar positioning
     @State private var sidebarWidth: CGFloat = 0
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -104,6 +112,25 @@ struct LoggedInView: View {
     }
 
     var body: some View {
+        switch blockingState {
+        case .premiumRequired:
+            PremiumRequiredView(
+                displayName: store.userProfile?.displayName,
+                onLogout: onLogout,
+            )
+            .frame(minWidth: 500, minHeight: 400)
+        case .userNotWhitelisted:
+            UserNotWhitelistedView(
+                clientId: SpotifyConfig.getClientId(),
+                onLogout: onLogout,
+            )
+            .frame(minWidth: 500, minHeight: 400)
+        case nil:
+            mainAppView
+        }
+    }
+
+    private var mainAppView: some View {
         ZStack(alignment: .bottom) {
             if !windowState.isMiniPlayerMode {
                 mainLayoutView
@@ -145,8 +172,22 @@ struct LoggedInView: View {
             // Load startup data
             let token = await session.validAccessToken()
 
-            // Load user ID first (needed for playlist ownership checks)
-            await session.loadUserIdIfNeeded()
+            // Load user profile first (provides userId + premium check + whitelist check)
+            do {
+                let profile = try await SpotifyAPI.getCurrentUserProfile(accessToken: token)
+                store.setUserProfile(profile)
+
+                // Require Spotify Premium (librespot only works with Premium accounts)
+                guard profile.product == "premium" else {
+                    blockingState = .premiumRequired
+                    return
+                }
+            } catch SpotifyAPIError.forbidden {
+                blockingState = .userNotWhitelisted
+                return
+            } catch {
+                // Profile load failed for other reasons - continue without profile
+            }
 
             // Load favorites so heart indicators work everywhere
             async let favorites: () = { try? await trackService.loadFavorites(accessToken: token) }()
@@ -411,7 +452,7 @@ struct LoggedInView: View {
     }
 
     private func playlistContextMenu(playlist: Playlist) -> some View {
-        let isOwner = playlist.ownerId == session.userId
+        let isOwner = playlist.ownerId == store.userId
         let isInLibrary = store.userPlaylistIds.contains(playlist.id)
 
         return Menu {
@@ -531,6 +572,7 @@ struct LoggedInView: View {
                 onLogout()
             },
             hasSearchResults: store.searchResults != nil,
+            userProfile: store.userProfile,
         )
         .background {
             GeometryReader { geometry in
@@ -658,6 +700,14 @@ struct LoggedInView: View {
                         case .speakers:
                             SpeakersView(playbackViewModel: playbackViewModel)
                                 .navigationTitle("nav.speakers")
+
+                        case .profile:
+                            if let profile = store.userProfile {
+                                UserProfileView(userProfile: profile, onLogout: {
+                                    playbackViewModel.stop()
+                                    onLogout()
+                                })
+                            }
 
                         case .searchResults:
                             // Handled in outer if statement

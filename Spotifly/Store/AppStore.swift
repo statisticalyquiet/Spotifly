@@ -126,6 +126,16 @@ final class AppStore {
     var devicesIsLoading = false
     var devicesErrorMessage: String?
 
+    // MARK: - User Profile
+
+    /// Current user's profile (singleton)
+    private(set) var userProfile: UserProfile?
+
+    /// Current user's Spotify ID (derived from profile)
+    var userId: String? {
+        userProfile?.id
+    }
+
     // MARK: - Connection State
 
     /// Our connection to Spotify (single source of truth for connection info)
@@ -556,6 +566,13 @@ final class AppStore {
     /// Set queue error message
     func setQueueError(_ message: String?) {
         queue.errorMessage = message
+    }
+
+    // MARK: - User Profile Actions
+
+    /// Set user profile
+    func setUserProfile(_ profile: UserProfile?) {
+        userProfile = profile
     }
 
     // MARK: - Connection State Actions

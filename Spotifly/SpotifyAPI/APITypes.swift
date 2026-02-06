@@ -479,6 +479,26 @@ struct DeviceCodable: Decodable {
 /// User profile
 struct UserProfileCodable: Decodable {
     let id: String
+    let displayName: String?
+    let email: String?
+    let images: [ImageCodable]?
+    let externalUrls: ExternalUrlsCodable?
+    let followers: FollowersCodable?
+    let product: String?
+    let country: String?
+    let uri: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+        case email
+        case images
+        case externalUrls = "external_urls"
+        case followers
+        case product
+        case country
+        case uri
+    }
 }
 
 /// Saved tracks
@@ -688,6 +708,7 @@ struct SearchResultsCodable: Decodable {
 /// Errors from Spotify API
 enum SpotifyAPIError: Error, LocalizedError {
     case apiError(String)
+    case forbidden
     case invalidResponse
     case invalidURI
     case networkError(Error)
@@ -698,6 +719,8 @@ enum SpotifyAPIError: Error, LocalizedError {
         switch self {
         case let .apiError(message):
             "Spotify API error: \(message)"
+        case .forbidden:
+            "Forbidden - access denied"
         case .invalidResponse:
             "Invalid response from Spotify"
         case .invalidURI:

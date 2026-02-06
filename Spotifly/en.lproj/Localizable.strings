@@ -22,6 +22,7 @@
 "nav.queue" = "Queue";
 "nav.speakers" = "Speakers";
 "nav.library" = "Library";
+"nav.profile" = "Profile";
 "nav.back_to %@" = "Back to %@";
 "nav.currently_viewing" = "Currently Viewing";
 "nav.your_library" = "Your Library";
@@ -260,3 +261,24 @@
 "error.remove_album %@" = "Failed to remove album: %@";
 "error.unfollow_artist %@" = "Failed to unfollow artist: %@";
 "error.follow_artist %@" = "Failed to follow artist: %@";
+
+/* Premium Required */
+"premium.required.title" = "Spotify Premium Required";
+"premium.required.logged_in_as %@" = "Logged in as %@";
+"premium.required.message" = "Spotifly requires a Spotify Premium account. It uses Spotify Connect to stream music, which is only available with Premium.";
+
+/* User Not Whitelisted */
+"whitelist.title" = "User Not Registered";
+"whitelist.message" = "Your Spotify account is not registered for this app. Each user must be added to the allowlist in the Spotify Developer Dashboard.";
+"whitelist.steps" = "How to fix this";
+"whitelist.step1 %@" = "Only the owner of the app with Client ID %@ can add users.";
+"whitelist.open_dashboard" = "Open Spotify Developer Dashboard";
+"whitelist.step2" = "Ask the app owner to add your Spotify email address under \"User Management\".";
+
+/* Profile */
+"profile.logged_in_as %@" = "Logged in as %@";
+"profile.open_in_spotify" = "Open in Spotify";
+"profile.email" = "Email";
+"profile.country" = "Country";
+"profile.subscription" = "Subscription";
+"profile.followers" = "Followers";
