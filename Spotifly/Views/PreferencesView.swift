@@ -81,10 +81,10 @@ struct PlaybackSettingsView: View {
 
 /// Identifiers for startpage sections
 enum StartpageSection: String, CaseIterable, Identifiable {
+    case topAlbums
     case topArtists
     case recentlyPlayed
     case newReleases
-    case topAlbums
 
     var id: String {
         rawValue
