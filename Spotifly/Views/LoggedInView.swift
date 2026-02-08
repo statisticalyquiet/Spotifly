@@ -48,10 +48,6 @@ struct LoggedInView: View {
         TopItemsService(store: store)
     }
 
-    private var newReleasesService: NewReleasesService {
-        NewReleasesService(store: store)
-    }
-
     @State private var navigationCoordinator = NavigationCoordinator()
 
     init(authResult: SpotifyAuthResult, onLogout: @escaping () -> Void) {
@@ -151,7 +147,6 @@ struct LoggedInView: View {
         .environment(recentlyPlayedService)
         .environment(searchService)
         .environment(topItemsService)
-        .environment(newReleasesService)
         .environment(navigationCoordinator)
         .environment(store)
         .environment(trackService)
@@ -172,16 +167,10 @@ struct LoggedInView: View {
             // Load startup data
             let token = await session.validAccessToken()
 
-            // Load user profile first (provides userId + premium check + whitelist check)
+            // Load user profile (provides userId + whitelist check)
             do {
                 let profile = try await SpotifyAPI.getCurrentUserProfile(accessToken: token)
                 store.setUserProfile(profile)
-
-                // Require Spotify Premium (librespot only works with Premium accounts)
-                guard profile.product == "premium" else {
-                    blockingState = .premiumRequired
-                    return
-                }
             } catch SpotifyAPIError.forbidden {
                 blockingState = .userNotWhitelisted
                 return
@@ -189,17 +178,27 @@ struct LoggedInView: View {
                 // Profile load failed for other reasons - continue without profile
             }
 
+            // Require Spotify Premium (librespot only works with Premium accounts).
+            // The product field was removed from /me, so we probe a premium-only endpoint.
+            do {
+                _ = try await SpotifyAPI.fetchAvailableDevices(accessToken: token)
+            } catch SpotifyAPIError.forbidden {
+                blockingState = .premiumRequired
+                return
+            } catch {
+                // Network/other errors - don't block startup, playback will fail later if not premium
+            }
+
             // Load favorites so heart indicators work everywhere
             async let favorites: () = { try? await trackService.loadFavorites(accessToken: token) }()
 
-            // Load startpage data (top artists, top tracks, new releases, recently played)
+            // Load startpage data (top artists, top tracks, recently played)
             let timeRange = TopItemsTimeRange(rawValue: topItemsTimeRange) ?? .mediumTerm
             async let topArtists: () = topItemsService.loadTopArtists(accessToken: token, timeRange: timeRange)
             async let topTracks: () = topItemsService.loadTopTracks(accessToken: token, timeRange: timeRange)
-            async let newReleases: () = newReleasesService.loadNewReleases(accessToken: token)
             async let recentlyPlayed: () = recentlyPlayedService.loadRecentlyPlayed(accessToken: token)
 
-            _ = await (favorites, topArtists, topTracks, newReleases, recentlyPlayed)
+            _ = await (favorites, topArtists, topTracks, recentlyPlayed)
 
             // Set token provider for automatic reconnection
             playbackViewModel.setTokenProvider { await session.validAccessToken() }

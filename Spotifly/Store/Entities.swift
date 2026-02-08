@@ -116,7 +116,6 @@ struct Artist: Identifiable, Sendable, Hashable, Encodable {
     let uri: String
     let imageURL: URL?
     let genres: [String]
-    let followers: Int?
     let externalUrl: String?
 }
 
@@ -192,12 +191,8 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
 struct UserProfile: Sendable {
     let id: String
     let displayName: String
-    let email: String?
     let imageURL: URL?
     let externalUrl: String?
-    let followers: Int?
-    let product: String?
-    let country: String?
     let uri: String?
 }
 
