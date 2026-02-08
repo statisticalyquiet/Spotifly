@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-02-08
+
+### Added
+- Context-aware track playback: double-tap a track in an album, playlist, or favorites to play from that position within the context (thanks [@vitbashy](https://github.com/vitbashy)!)
+
 ### Changed
 - Adapt to [Spotify Web API breaking changes (February 2026)](https://developer.spotify.com/documentation/web-api/references/changes/february-2026): migrate removed endpoints, update playlist response structure, and replace batch fetches with parallel individual requests
+
+### Fixed
+- Double-tapping a queue track when playing radio (no context URI) no longer silently does nothing — falls back to single track playback
+- Clicking a track card in search results before any playback has occurred now properly initializes the player first
 
 ### Removed
 - Artist top tracks section (endpoint removed by Spotify with no alternative)
