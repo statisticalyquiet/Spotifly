@@ -217,6 +217,14 @@ struct AlbumDetailView: View {
                                 playbackViewModel: playbackViewModel,
                                 currentSection: .albums,
                                 selectionId: albumId,
+                                onDoubleTap: {
+                                    let token = await session.validAccessToken()
+                                    await playbackViewModel.play(
+                                        uriOrUrl: album.uri,
+                                        trackIndex: index,
+                                        accessToken: token,
+                                    )
+                                },
                             )
 
                             if index < tracks.count - 1 {

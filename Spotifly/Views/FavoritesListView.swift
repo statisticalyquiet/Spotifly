@@ -63,6 +63,14 @@ struct FavoritesListView: View {
                                 currentlyPlayingURI: playbackViewModel.currentlyPlayingURI,
                                 playbackViewModel: playbackViewModel,
                                 currentSection: .favorites,
+                                onDoubleTap: {
+                                    let token = await session.validAccessToken()
+                                    await playbackViewModel.play(
+                                        uriOrUrl: "spotify:collection:tracks",
+                                        trackIndex: index,
+                                        accessToken: token,
+                                    )
+                                },
                             )
 
                             if index < store.favoriteTracks.count - 1 {

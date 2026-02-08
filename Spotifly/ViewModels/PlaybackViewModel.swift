@@ -171,7 +171,7 @@ final class PlaybackViewModel {
         isLoading = false
     }
 
-    func play(uriOrUrl: String, accessToken: String) async {
+    func play(uriOrUrl: String, trackIndex: Int = -1, accessToken: String) async {
         // Initialize if needed
         if !isInitialized {
             await initializeIfNeeded(accessToken: accessToken)
@@ -186,7 +186,7 @@ final class PlaybackViewModel {
         errorMessage = nil
 
         do {
-            try await SpotifyPlayer.play(uriOrUrl: uriOrUrl)
+            try await SpotifyPlayer.play(uriOrUrl: uriOrUrl, trackIndex: trackIndex)
             handlePlaybackStarted(trackId: uriOrUrl)
         } catch {
             errorMessage = error.localizedDescription
