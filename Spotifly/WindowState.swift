@@ -27,8 +27,12 @@ class WindowState: ObservableObject {
         }
     }
 
+    private func resolvedWindow(preferred window: NSWindow? = nil) -> NSWindow? {
+        window ?? NSApp.mainWindow ?? NSApp.keyWindow ?? NSApp.windows.first
+    }
+
     private func enterMiniPlayerMode() {
-        guard let window = NSApp.mainWindow ?? NSApp.windows.first else { return }
+        guard let window = resolvedWindow() else { return }
 
         // Save current window frame before switching
         savedWindowFrame = window.frame
@@ -56,8 +60,9 @@ class WindowState: ObservableObject {
         }
     }
 
-    private func exitMiniPlayerMode() {
-        guard let window = NSApp.mainWindow ?? NSApp.windows.first else { return }
+    func exitMiniPlayerMode(window preferredWindow: NSWindow? = nil) {
+        guard isMiniPlayerMode else { return }
+        guard let window = resolvedWindow(preferred: preferredWindow) else { return }
 
         // Restore resizable style
         window.styleMask.insert(.resizable)

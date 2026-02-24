@@ -72,6 +72,9 @@ struct SpotiflyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { notification in
+                    windowState.exitMiniPlayerMode(window: notification.object as? NSWindow)
+                }
                 .environmentObject(windowState)
         }
         .windowResizability(windowState.isMiniPlayerMode ? .contentSize : .automatic)
