@@ -254,7 +254,7 @@ final class PlaybackViewModel {
         isPlaying = true
         // Apply volume after playback starts (mixer is now initialized)
         SpotifyPlayer.setVolume(volume)
-        updateNowPlayingInfo(forcePositionUpdate: true)
+        updateNowPlayingInfo()
         syncPositionAnchor()
         // Note: favorite status is checked by NowPlayingBarView's .task(id:) when currentTrackUri changes
     }
@@ -313,7 +313,7 @@ final class PlaybackViewModel {
         positionAnchorMs = 0
         positionAnchorTime = CACurrentMediaTime()
         currentPositionMs = 0
-        updateNowPlayingInfo(forcePositionUpdate: true)
+        updateNowPlayingInfo()
     }
 
     func previous() {
@@ -339,7 +339,7 @@ final class PlaybackViewModel {
         positionAnchorMs = 0
         positionAnchorTime = CACurrentMediaTime()
         currentPositionMs = 0
-        updateNowPlayingInfo(forcePositionUpdate: true)
+        updateNowPlayingInfo()
     }
 
     func seek(to positionMs: UInt32) {
@@ -347,7 +347,7 @@ final class PlaybackViewModel {
         positionAnchorMs = positionMs
         positionAnchorTime = CACurrentMediaTime()
         currentPositionMs = positionMs
-        updateNowPlayingInfo(forcePositionUpdate: true)
+        updateNowPlayingPosition()
 
         // Debounce the actual seek operation to avoid flooding Spirc/API with requests
         seekSubject.send(positionMs)
@@ -398,7 +398,7 @@ final class PlaybackViewModel {
         // Keep the current positionAnchorMs (correct from paused state), just update the time
         positionAnchorTime = CACurrentMediaTime()
         isPlaying = true
-        updateNowPlayingInfo(forcePositionUpdate: true)
+        updateNowPlayingPosition()
     }
 
     /// Returns true if there are tracks in the queue after the current track
@@ -449,7 +449,7 @@ final class PlaybackViewModel {
                     // Keep current position anchor, just update time
                     self.positionAnchorTime = CACurrentMediaTime()
                     self.isPlaying = true
-                    self.updateNowPlayingInfo(forcePositionUpdate: true)
+                    self.updateNowPlayingPosition()
                 }
             }
             return .success
@@ -467,7 +467,7 @@ final class PlaybackViewModel {
                 if self.isPlaying {
                     SpotifyPlayer.pause()
                     self.isPlaying = false
-                    self.updateNowPlayingInfo(forcePositionUpdate: true)
+                    self.updateNowPlayingPosition()
                 }
             }
             return .success
@@ -491,7 +491,7 @@ final class PlaybackViewModel {
                     self.positionAnchorTime = CACurrentMediaTime()
                     self.isPlaying = true
                 }
-                self.updateNowPlayingInfo(forcePositionUpdate: true)
+                self.updateNowPlayingPosition()
             }
             return .success
         }
@@ -522,10 +522,9 @@ final class PlaybackViewModel {
         }
     }
 
-    /// Updates the system's Now Playing info (Control Center, Lock Screen).
-    /// - Parameter forcePositionUpdate: When true, updates elapsed time. When false (default),
-    ///   skips elapsed time to prevent seek bar flicker. Pass true for: new track, seek, play/pause.
-    func updateNowPlayingInfo(forcePositionUpdate: Bool = false) {
+    /// Full Now Playing update — sets track metadata, duration, position, rate, and artwork.
+    /// Call on: track start, next/prev, initial Web API load.
+    func updateNowPlayingInfo() {
         // Don't update Now Playing with invalid data - causes --:-- display
         guard trackDurationMs > 0 else { return }
 
@@ -544,17 +543,10 @@ final class PlaybackViewModel {
 
         nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = Double(trackDurationMs) / 1000.0
 
-        // Only update elapsed time when explicitly requested to prevent seek bar flicker.
-        // The system smoothly interpolates position based on playback rate, so setting
-        // elapsed time unnecessarily resets that interpolation and causes a visible jump.
-        if forcePositionUpdate {
-            let validPosition = min(currentPositionMs, trackDurationMs)
-            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(validPosition) / 1000.0
-        }
-
+        let validPosition = min(currentPositionMs, trackDurationMs)
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(validPosition) / 1000.0
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
 
-        // Update Now Playing (preserves existing artwork)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
 
         // Album art - only download if URL changed
@@ -583,6 +575,17 @@ final class PlaybackViewModel {
                 }
             }
         }
+    }
+
+    /// Lightweight Now Playing update — only writes elapsed time + playback rate.
+    /// No metadata or artwork processing. Call on: seek, play/pause, drift correction.
+    func updateNowPlayingPosition() {
+        guard trackDurationMs > 0 else { return }
+        var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        let validPosition = min(currentPositionMs, trackDurationMs)
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(validPosition) / 1000.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
 
     // MARK: - Playback State Subscription
@@ -725,9 +728,9 @@ final class PlaybackViewModel {
             currentPositionMs = posMs
         }
 
-        // Update Now Playing info if state changed
+        // Update Now Playing position if playback rate changed
         if wasPlaying != isPlaying {
-            updateNowPlayingInfo()
+            updateNowPlayingPosition()
         }
     }
 
@@ -842,7 +845,7 @@ final class PlaybackViewModel {
 
         defer {
             if didCorrectDrift {
-                updateNowPlayingInfo(forcePositionUpdate: true)
+                updateNowPlayingPosition()
             }
         }
 
@@ -859,12 +862,6 @@ final class PlaybackViewModel {
 
         // Skip position updates while paused - position only changes during playback
         guard isPlaying else { return }
-
-        // Update currentPositionMs for non-TimelineView consumers
-        let interpolated = interpolatedPositionMs
-        if interpolated != currentPositionMs {
-            currentPositionMs = interpolated
-        }
 
         // Check for significant drift from Rust position - only when active device
         // Remote playback position is interpolated from cluster timestamp, not real-time
