@@ -443,6 +443,24 @@ pub extern "C" fn spotifly_register_connection_state_callback(
     *cb = Some(callback);
 }
 
+/// Registers a callback to receive raw PCM audio data (f32, 44100Hz, stereo interleaved).
+/// Called from librespot's player thread for each decoded audio chunk.
+/// The callback receives a pointer to f32 samples and the number of f32 values.
+#[no_mangle]
+pub extern "C" fn spotifly_register_audio_data_callback(
+    callback: extern "C" fn(*const f32, usize),
+) {
+    proxy_sink::register_audio_data_callback(callback);
+}
+
+/// Registers a callback for audio control events (start/stop/clear).
+/// Called from librespot's player thread.
+/// Events: 0 = stop, 1 = start/resume, 2 = clear/flush
+#[no_mangle]
+pub extern "C" fn spotifly_register_audio_control_callback(callback: extern "C" fn(u8)) {
+    proxy_sink::register_audio_control_callback(callback);
+}
+
 /// Returns the current connection state as a JSON string.
 /// Caller must free the returned string using spotifly_free_string().
 #[no_mangle]
@@ -1925,13 +1943,13 @@ pub extern "C" fn spotifly_pause() -> i32 {
     }
 }
 
-/// Clears any buffered audio samples synchronously.
-/// Blocks until the audio buffer is flushed.
+/// Clears any buffered audio samples.
+/// The Swift-side callback handles the flush synchronously before returning.
 /// Note: spotifly_disconnect() already handles this internally.
 #[no_mangle]
 pub extern "C" fn spotifly_clear_audio_buffer() {
     debug!("spotifly_clear_audio_buffer called");
-    proxy_sink::ProxySink::clear_buffer_sync();
+    proxy_sink::ProxySink::clear_buffer();
 }
 
 /// Resumes playback.
@@ -2021,7 +2039,7 @@ pub extern "C" fn spotifly_disconnect() -> i32 {
         // Clear the audio buffer synchronously to flush any remaining samples
         // This must complete before we return, otherwise stale audio plays on wake
         drop(spirc_guard); // Release lock before blocking call
-        proxy_sink::ProxySink::clear_buffer_sync();
+        proxy_sink::ProxySink::clear_buffer();
         debug!("spotifly_disconnect: audio buffer cleared");
 
         // Now shutdown Spirc (disconnect from Spotify Connect)
