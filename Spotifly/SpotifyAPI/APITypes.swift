@@ -221,6 +221,21 @@ struct ImageCodable: Decodable {
     let width: Int?
 }
 
+extension [ImageCodable] {
+    /// Preferred image URL for display.
+    /// Targets the medium-size image (~300px) rather than the full 640px,
+    /// since the app never displays images larger than 200pt. This reduces
+    /// download size and eliminates OS-side JPEG transcode in Now Playing.
+    var preferredURL: String? {
+        // Spotify returns images sorted by size descending: [640, 300, 64].
+        // Pick the first image whose width is ≤ 400px (targets the 300px variant).
+        // Falls back to the largest if no medium found (e.g., playlist mosaics
+        // that only have a single 640px image).
+        let medium = first(where: { ($0.width ?? Int.max) <= 400 && ($0.width ?? 0) >= 100 })
+        return (medium ?? first)?.url
+    }
+}
+
 struct ExternalUrlsCodable: Decodable {
     let spotify: String?
 }
@@ -266,7 +281,7 @@ extension ArtistCodable {
         return APIArtist(
             id: id,
             genres: genres ?? [],
-            imageURL: (images?.first?.url).flatMap { URL(string: $0) },
+            imageURL: images?.preferredURL.flatMap { URL(string: $0) },
             name: name,
             uri: uri,
             externalUrl: externalUrls?.spotify,
@@ -323,7 +338,7 @@ struct AlbumCodable: Decodable {
             artistId: artist?.id,
             artistName: artist?.name ?? "Unknown",
             externalUrl: externalUrls?.spotify,
-            imageURL: (images?.first?.url).flatMap { URL(string: $0) },
+            imageURL: images?.preferredURL.flatMap { URL(string: $0) },
             name: name,
             releaseDate: releaseDate ?? "",
             totalDurationMs: totalDurationMs,
@@ -365,7 +380,7 @@ struct TrackCodable: Decodable {
             artistName: artist?.name ?? "Unknown",
             durationMs: durationMs,
             externalUrl: externalUrls?.spotify,
-            imageURL: imageURL ?? (album?.images?.first?.url).flatMap { URL(string: $0) },
+            imageURL: imageURL ?? album?.images?.preferredURL.flatMap { URL(string: $0) },
             name: name,
             trackNumber: trackNumber,
             uri: uri,
@@ -413,7 +428,7 @@ struct PlaylistCodable: Decodable {
         return APIPlaylist(
             id: id,
             description: description,
-            imageURL: (images?.first?.url).flatMap { URL(string: $0) },
+            imageURL: images?.preferredURL.flatMap { URL(string: $0) },
             isPublic: `public`,
             name: name,
             ownerId: owner.id,

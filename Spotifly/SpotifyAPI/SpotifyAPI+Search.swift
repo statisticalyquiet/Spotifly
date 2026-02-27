@@ -54,7 +54,7 @@ extension SpotifyAPI {
                         artistId: artist?.id,
                         artistName: artist?.name ?? "Unknown",
                         albumName: track.album?.name,
-                        imageURL: (track.album?.images?.first?.url).flatMap { URL(string: $0) },
+                        imageURL: track.album?.images?.preferredURL.flatMap { URL(string: $0) },
                     )
                 } ?? []
 
@@ -65,7 +65,7 @@ extension SpotifyAPI {
                         id: album.id,
                         name: album.name,
                         uri: album.uri,
-                        imageURL: (album.images?.first?.url).flatMap { URL(string: $0) },
+                        imageURL: album.images?.preferredURL.flatMap { URL(string: $0) },
                         releaseDate: album.releaseDate,
                         albumType: album.albumType,
                         externalUrl: album.externalUrls?.spotify,
@@ -84,7 +84,7 @@ extension SpotifyAPI {
                         id: id,
                         name: artist.name,
                         uri: uri,
-                        imageURL: (artist.images?.first?.url).flatMap { URL(string: $0) },
+                        imageURL: artist.images?.preferredURL.flatMap { URL(string: $0) },
                         genres: artist.genres ?? [],
                         externalUrl: artist.externalUrls?.spotify,
                     )
@@ -97,7 +97,7 @@ extension SpotifyAPI {
                         id: playlist.id,
                         name: playlist.name,
                         description: playlist.description,
-                        imageURL: (playlist.images?.first?.url).flatMap { URL(string: $0) },
+                        imageURL: playlist.images?.preferredURL.flatMap { URL(string: $0) },
                         uri: playlist.uri,
                         isPublic: playlist.public ?? true,
                         ownerId: playlist.owner.id,
