@@ -41,6 +41,16 @@ mkdir -p "$OUTPUT_DIR/include"
 
 cd "$RUST_DIR"
 
+# Enable hardware-accelerated AES, NEON, and SHA on Apple Silicon.
+# - target-cpu=apple-m1: enables ARM crypto target features (aes, neon, sha2)
+#   so cpufeatures can resolve at compile time instead of runtime detection.
+#   Uses apple-m1 (baseline Apple Silicon) rather than "native" so
+#   cross-compiled iOS builds also get hardware crypto.
+# - --cfg aes_armv8: the `aes` crate 0.8 gates its ARMv8 intrinsics backend
+#   behind this cfg flag. Without it, it falls back to software fixslice
+#   which is ~10x slower than ARM crypto extensions.
+export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=apple-m1 --cfg aes_armv8"
+
 # Build for the appropriate target based on platform
 case "$PLATFORM_NAME" in
     macosx*)
