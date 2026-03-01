@@ -116,7 +116,7 @@ final class TopItemsService {
                         id: albumId,
                         name: apiTrack.albumName ?? "",
                         uri: "spotify:album:\(albumId)",
-                        imageURL: apiTrack.imageURL,
+                        images: apiTrack.images,
                         releaseDate: nil,
                         albumType: nil,
                         externalUrl: nil,

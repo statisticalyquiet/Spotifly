@@ -19,6 +19,7 @@ struct ArtistDetailView: View {
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
     @Environment(AppStore.self) private var store
     @Environment(ArtistService.self) private var artistService
+    @Environment(\.displayScale) private var displayScale
 
     @State private var artist: Artist?
     @State private var albums: [Album] = []
@@ -97,8 +98,8 @@ struct ArtistDetailView: View {
             VStack(spacing: 24) {
                 // Artist image and metadata
                 VStack(spacing: 16) {
-                    if let imageURL = artist.imageURL {
-                        AsyncImage(url: imageURL) { phase in
+                    if let url = artist.images.url(for: 200, scale: displayScale) {
+                        AsyncImage(url: url) { phase in
                             switch phase {
                             case .empty:
                                 ProgressView()
@@ -197,11 +198,13 @@ struct ArtistDetailView: View {
         let album: Album
         let onTap: () -> Void
 
+        @Environment(\.displayScale) private var displayScale
+
         var body: some View {
             Button(action: onTap) {
                 VStack(alignment: .leading, spacing: 8) {
-                    if let imageURL = album.imageURL {
-                        AsyncImage(url: imageURL) { phase in
+                    if let url = album.images.url(for: 150, scale: displayScale) {
+                        AsyncImage(url: url) { phase in
                             switch phase {
                             case .empty:
                                 ProgressView()

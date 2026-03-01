@@ -20,6 +20,7 @@ struct AlbumDetailView: View {
     @Environment(AppStore.self) private var store
     @Environment(AlbumService.self) private var albumService
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
+    @Environment(\.displayScale) private var displayScale
 
     @State private var album: Album?
     @State private var isLoadingAlbum = false
@@ -102,8 +103,8 @@ struct AlbumDetailView: View {
             VStack(spacing: 24) {
                 // Album art and metadata
                 VStack(spacing: 16) {
-                    if let imageURL = album.imageURL {
-                        AsyncImage(url: imageURL) { phase in
+                    if let url = album.images.url(for: 200, scale: displayScale) {
+                        AsyncImage(url: url) { phase in
                             switch phase {
                             case .empty:
                                 ProgressView()

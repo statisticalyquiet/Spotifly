@@ -10,17 +10,18 @@ import SwiftUI
 struct PlaylistCard: View {
     let id: String
     let name: String
-    let imageURL: URL?
+    let images: ImageSet
 
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Button {
             navigationCoordinator.navigateToPlaylistDetail(playlistId: id)
         } label: {
             VStack(spacing: 8) {
-                if let imageURL {
-                    AsyncImage(url: imageURL) { phase in
+                if let url = images.url(for: 120, scale: displayScale) {
+                    AsyncImage(url: url) { phase in
                         switch phase {
                         case .empty:
                             ProgressView()
@@ -71,6 +72,6 @@ extension PlaylistCard {
     init(playlist: Playlist) {
         id = playlist.id
         name = playlist.name
-        imageURL = playlist.imageURL
+        images = playlist.images
     }
 }

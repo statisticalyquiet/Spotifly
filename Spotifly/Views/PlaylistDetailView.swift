@@ -20,6 +20,7 @@ struct PlaylistDetailView: View {
     @Environment(AppStore.self) private var store
     @Environment(PlaylistService.self) private var playlistService
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
+    @Environment(\.displayScale) private var displayScale
 
     @State private var playlist: Playlist?
     @State private var isLoadingPlaylist = false
@@ -176,8 +177,8 @@ struct PlaylistDetailView: View {
 
     @ViewBuilder
     private func playlistArtwork(_ playlist: Playlist) -> some View {
-        if let imageURL = playlist.imageURL {
-            AsyncImage(url: imageURL) { phase in
+        if let url = playlist.images.url(for: 200, scale: displayScale) {
+            AsyncImage(url: url) { phase in
                 switch phase {
                 case .empty:
                     ProgressView()

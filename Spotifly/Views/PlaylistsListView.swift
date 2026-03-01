@@ -141,6 +141,7 @@ struct PlaylistRow: View {
     let onSelect: () -> Void
 
     @Environment(SpotifySession.self) private var session
+    @Environment(\.displayScale) private var displayScale
     @State private var isHovering = false
 
     private let imageSize: CGFloat = 36
@@ -148,8 +149,8 @@ struct PlaylistRow: View {
     var body: some View {
         HStack(spacing: 10) {
             // Playlist image
-            if let imageURL = playlist.imageURL {
-                AsyncImage(url: imageURL) { phase in
+            if let url = playlist.images.url(for: imageSize, scale: displayScale) {
+                AsyncImage(url: url) { phase in
                     switch phase {
                     case .empty:
                         playlistPlaceholder

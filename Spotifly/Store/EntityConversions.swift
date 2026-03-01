@@ -22,12 +22,12 @@ extension Track {
         artistId = track.artistId
         artistName = track.artistName
         albumName = track.albumName
-        imageURL = track.imageURL
+        images = track.images
     }
 
     /// Convert from APITrack with album context override
     /// Used when album info isn't included in the API response (e.g., album tracks endpoint)
-    init(from track: APITrack, albumId: String, albumName: String, imageURL: URL?) {
+    init(from track: APITrack, albumId: String, albumName: String, images: ImageSet) {
         id = track.id
         name = track.name
         uri = track.uri
@@ -38,7 +38,7 @@ extension Track {
         artistId = track.artistId
         artistName = track.artistName
         self.albumName = albumName
-        self.imageURL = imageURL
+        self.images = images
     }
 }
 
@@ -51,7 +51,7 @@ extension Album {
             id: album.id,
             name: album.name,
             uri: album.uri,
-            imageURL: album.imageURL,
+            images: album.images,
             releaseDate: album.releaseDate,
             albumType: album.albumType,
             externalUrl: album.externalUrl,
@@ -69,7 +69,7 @@ extension Album {
             id: album.id,
             name: album.name,
             uri: album.uri,
-            imageURL: album.imageURL,
+            images: album.images,
             releaseDate: album.releaseDate,
             albumType: album.albumType,
             externalUrl: album.externalUrl,
@@ -90,7 +90,7 @@ extension Artist {
         id = artist.id
         name = artist.name
         uri = artist.uri
-        imageURL = artist.imageURL
+        images = artist.images
         genres = artist.genres
         externalUrl = artist.externalUrl
     }
@@ -118,7 +118,7 @@ extension Playlist {
             id: playlist.id,
             name: playlist.name,
             description: playlist.description,
-            imageURL: playlist.imageURL,
+            images: playlist.images,
             uri: playlist.uri,
             isPublic: playlist.isPublic ?? true,
             ownerId: playlist.ownerId,
@@ -136,7 +136,7 @@ extension Playlist {
             id: playlist.id,
             name: playlist.name,
             description: playlist.description,
-            imageURL: playlist.imageURL,
+            images: playlist.images,
             uri: playlist.uri,
             isPublic: playlist.isPublic ?? true,
             ownerId: playlist.ownerId,

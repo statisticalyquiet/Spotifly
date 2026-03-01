@@ -11,10 +11,11 @@ struct AlbumCard: View {
     let id: String
     let name: String
     let artistName: String
-    let imageURL: URL?
+    let images: ImageSet
     let currentSection: NavigationItem
 
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Button {
@@ -24,8 +25,8 @@ struct AlbumCard: View {
             )
         } label: {
             VStack(spacing: 8) {
-                if let imageURL {
-                    AsyncImage(url: imageURL) { phase in
+                if let url = images.url(for: 120, scale: displayScale) {
+                    AsyncImage(url: url) { phase in
                         switch phase {
                         case .empty:
                             ProgressView()
@@ -83,7 +84,7 @@ extension AlbumCard {
         id = album.id
         name = album.name
         artistName = album.artistName
-        imageURL = album.imageURL
+        images = album.images
         self.currentSection = currentSection
     }
 }

@@ -10,10 +10,11 @@ import SwiftUI
 struct ArtistCard: View {
     let id: String
     let name: String
-    let imageURL: URL?
+    let images: ImageSet
     let currentSection: NavigationItem
 
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Button {
@@ -23,8 +24,8 @@ struct ArtistCard: View {
             )
         } label: {
             VStack(spacing: 8) {
-                if let imageURL {
-                    AsyncImage(url: imageURL) { phase in
+                if let url = images.url(for: 120, scale: displayScale) {
+                    AsyncImage(url: url) { phase in
                         switch phase {
                         case .empty:
                             ProgressView()
@@ -76,7 +77,7 @@ extension ArtistCard {
     init(artist: Artist, currentSection: NavigationItem = .startpage) {
         id = artist.id
         name = artist.name
-        imageURL = artist.imageURL
+        images = artist.images
         self.currentSection = currentSection
     }
 }

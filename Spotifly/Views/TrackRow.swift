@@ -25,6 +25,7 @@ struct TrackRow: View {
     @Environment(AppStore.self) private var store
     @Environment(TrackService.self) private var trackService
     @Environment(PlaylistService.self) private var playlistService
+    @Environment(\.displayScale) private var displayScale
 
     @State private var isTogglingFavorite = false
     @State private var showNewPlaylistDialog = false
@@ -104,8 +105,8 @@ struct TrackRow: View {
             .frame(width: 30, alignment: showTrackNumber ? .trailing : .center)
 
             // Album art (if available)
-            if let imageURL = track.imageURL {
-                AsyncImage(url: imageURL) { phase in
+            if let url = track.images.url(for: 40, scale: displayScale) {
+                AsyncImage(url: url) { phase in
                     switch phase {
                     case .empty:
                         ProgressView()
@@ -295,9 +296,12 @@ struct TrackRow: View {
 // MARK: - QueueItem to Track Conversion
 
 extension QueueItem {
-    /// Convert QueueItem to Track for use with TrackRow and store operations
+    /// Convert QueueItem to Track for use with TrackRow and store operations.
+    /// Wraps the single FFI image URL as a ~300px variant; full metadata
+    /// arrives later via QueueService and replaces this in the store.
     func toTrack() -> Track {
-        Track(
+        let images = imageURL.map { ImageSet(variants: [ImageVariant(url: $0, size: 300)]) } ?? .empty
+        return Track(
             id: SpotifyAPI.parseTrackURI(uri) ?? id,
             name: name,
             uri: uri,
@@ -308,7 +312,7 @@ extension QueueItem {
             artistId: artistId,
             artistName: artistName,
             albumName: nil,
-            imageURL: imageURL,
+            images: images,
         )
     }
 }

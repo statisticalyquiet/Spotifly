@@ -185,23 +185,7 @@ final class QueueService {
                 guard !Task.isCancelled else { return }
 
                 // Convert APITrack to Track and store in the global store
-                var tracksToStore: [Track] = []
-                for (trackId, apiTrack) in trackData {
-                    let track = Track(
-                        id: trackId,
-                        name: apiTrack.name,
-                        uri: apiTrack.uri,
-                        durationMs: apiTrack.durationMs,
-                        trackNumber: apiTrack.trackNumber,
-                        externalUrl: apiTrack.externalUrl,
-                        albumId: apiTrack.albumId,
-                        artistId: apiTrack.artistId,
-                        artistName: apiTrack.artistName,
-                        albumName: apiTrack.albumName,
-                        imageURL: apiTrack.imageURL,
-                    )
-                    tracksToStore.append(track)
-                }
+                let tracksToStore = trackData.values.map { Track(from: $0) }
 
                 // Store tracks in the global cache
                 store.upsertTracks(tracksToStore)

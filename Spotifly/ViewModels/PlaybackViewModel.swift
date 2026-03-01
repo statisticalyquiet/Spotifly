@@ -550,9 +550,8 @@ final class PlaybackViewModel {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
 
         // Album art - only download if URL changed
-        let artURLString = currentTrack?.imageURL?.absoluteString
-        if let artURL = artURLString, artURL != lastAlbumArtURL, !artURL.isEmpty, let url = URL(string: artURL) {
-            lastAlbumArtURL = artURL
+        if let url = currentTrack?.images.mediumURL, url.absoluteString != lastAlbumArtURL {
+            lastAlbumArtURL = url.absoluteString
 
             // Download album art asynchronously
             Task {

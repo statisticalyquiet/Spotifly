@@ -8,6 +8,56 @@
 
 import Foundation
 
+// MARK: - Image Types
+
+/// A single image variant with its URL and pixel dimensions.
+struct ImageVariant: Sendable, Hashable, Encodable {
+    let url: URL
+    let size: Int // width in pixels (images are square)
+}
+
+/// A collection of image variants at different resolutions.
+/// Stores all sizes returned by the Spotify API and provides
+/// resolution-aware selection based on display size and scale.
+struct ImageSet: Sendable, Hashable, Encodable {
+    /// Sorted descending by size (largest first), matching Spotify's default order.
+    let variants: [ImageVariant]
+
+    /// Returns the best image URL for a given display size in points.
+    ///
+    /// Uses 20% tolerance — accepts a variant that covers at least 80% of the
+    /// target pixel size. This lets small views (34–40pt) use the 64px variant
+    /// instead of downloading the 300px image.
+    ///
+    /// - Parameters:
+    ///   - points: The display size in SwiftUI points (e.g. 120 for a 120×120pt view).
+    ///   - scale: The display scale factor (1.0 for non-retina, 2.0 for retina).
+    ///            Defaults to 2.0 since all modern Macs are retina.
+    /// - Returns: The URL of the best-fit image, or nil if no variants exist.
+    func url(for points: CGFloat, scale: CGFloat = 2.0) -> URL? {
+        guard !variants.isEmpty else { return nil }
+        let target = Int(points * scale)
+        let threshold = target * 4 / 5
+        // Smallest variant >= threshold, fallback to largest
+        let best = variants.reversed().first(where: { $0.size >= threshold })
+        return (best ?? variants.first)?.url
+    }
+
+    /// The medium image URL (~300px), suitable for Now Playing metadata
+    /// and general-purpose use where display size is unknown.
+    var mediumURL: URL? {
+        let medium = variants.first(where: { $0.size <= 400 && $0.size >= 100 })
+        return (medium ?? variants.first)?.url
+    }
+
+    var isEmpty: Bool {
+        variants.isEmpty
+    }
+
+    /// An empty image set with no variants.
+    static let empty = ImageSet(variants: [])
+}
+
 // MARK: - Track
 
 /// Unified track entity - single source of truth for all track data.
@@ -27,7 +77,7 @@ struct Track: Identifiable, Sendable, Hashable, Encodable {
     // Denormalized for display (avoids extra lookups for common display patterns)
     let artistName: String
     let albumName: String?
-    let imageURL: URL?
+    let images: ImageSet
 
     var durationFormatted: String {
         formatTrackTime(milliseconds: durationMs)
@@ -46,7 +96,7 @@ struct Album: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     let name: String
     let uri: String
-    let imageURL: URL?
+    let images: ImageSet
     let releaseDate: String?
     let albumType: String?
     let externalUrl: String?
@@ -82,7 +132,7 @@ struct Album: Identifiable, Sendable, Hashable, Encodable {
         id: String,
         name: String,
         uri: String,
-        imageURL: URL?,
+        images: ImageSet,
         releaseDate: String?,
         albumType: String?,
         externalUrl: String?,
@@ -95,7 +145,7 @@ struct Album: Identifiable, Sendable, Hashable, Encodable {
         self.id = id
         self.name = name
         self.uri = uri
-        self.imageURL = imageURL
+        self.images = images
         self.releaseDate = releaseDate
         self.albumType = albumType
         self.externalUrl = externalUrl
@@ -114,7 +164,7 @@ struct Artist: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     let name: String
     let uri: String
-    let imageURL: URL?
+    let images: ImageSet
     let genres: [String]
     let externalUrl: String?
 }
@@ -126,7 +176,7 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
     let id: String
     var name: String // Mutable - can be edited
     var description: String?
-    var imageURL: URL?
+    var images: ImageSet
     let uri: String
     var isPublic: Bool
     let ownerId: String
@@ -160,7 +210,7 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
         id: String,
         name: String,
         description: String?,
-        imageURL: URL?,
+        images: ImageSet,
         uri: String,
         isPublic: Bool,
         ownerId: String,
@@ -173,7 +223,7 @@ struct Playlist: Identifiable, Sendable, Hashable, Encodable {
         self.id = id
         self.name = name
         self.description = description
-        self.imageURL = imageURL
+        self.images = images
         self.uri = uri
         self.isPublic = isPublic
         self.ownerId = ownerId

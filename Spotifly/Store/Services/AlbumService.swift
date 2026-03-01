@@ -110,7 +110,7 @@ final class AlbumService {
                 from: albumTrack,
                 albumId: details.id,
                 albumName: details.name,
-                imageURL: details.imageURL,
+                images: details.images,
             )
         }
         store.upsertTracks(tracks)

@@ -13,14 +13,15 @@ struct TrackCard: View {
     var currentSection: NavigationItem = .searchResults
 
     @Environment(SpotifySession.self) private var session
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Button {
             playTrack()
         } label: {
             VStack(spacing: 8) {
-                if let imageURL = track.imageURL {
-                    AsyncImage(url: imageURL) { phase in
+                if let url = track.images.url(for: 120, scale: displayScale) {
+                    AsyncImage(url: url) { phase in
                         switch phase {
                         case .empty:
                             ProgressView()

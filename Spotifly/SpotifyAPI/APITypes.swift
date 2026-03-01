@@ -43,7 +43,7 @@ struct APITrack: Sendable, Identifiable {
     let artistName: String
     let durationMs: Int
     let externalUrl: String?
-    let imageURL: URL?
+    let images: ImageSet
     let name: String
     let trackNumber: Int?
     let uri: String
@@ -58,7 +58,7 @@ struct APIAlbum: Sendable, Identifiable, DurationFormattable {
     let artistId: String?
     let artistName: String
     let externalUrl: String?
-    let imageURL: URL?
+    let images: ImageSet
     let name: String
     let releaseDate: String
     let totalDurationMs: Int?
@@ -80,7 +80,7 @@ struct AlbumsResponse: Sendable {
 struct APIArtist: Sendable, Identifiable {
     let id: String
     let genres: [String]
-    let imageURL: URL?
+    let images: ImageSet
     let name: String
     let uri: String
     let externalUrl: String?
@@ -116,7 +116,7 @@ struct TopTracksResponse: Sendable {
 struct APIPlaylist: Sendable, Identifiable, DurationFormattable {
     let id: String
     let description: String?
-    let imageURL: URL?
+    let images: ImageSet
     let isPublic: Bool?
     var name: String
     let ownerId: String
@@ -222,15 +222,18 @@ struct ImageCodable: Decodable {
 }
 
 extension [ImageCodable] {
-    /// Preferred image URL for display.
-    /// Targets the medium-size image (~300px) rather than the full 640px,
-    /// since the app never displays images larger than 200pt. This reduces
-    /// download size and eliminates OS-side JPEG transcode in Now Playing.
+    /// Convert API image response to an ImageSet with all available sizes.
+    var toImageSet: ImageSet {
+        let variants = compactMap { img -> ImageVariant? in
+            guard let url = URL(string: img.url) else { return nil }
+            let size = img.width ?? img.height ?? 0
+            return ImageVariant(url: url, size: size)
+        }
+        return ImageSet(variants: variants.sorted { $0.size > $1.size })
+    }
+
+    /// Preferred single URL for contexts that only need one (e.g. UserProfile).
     var preferredURL: String? {
-        // Spotify returns images sorted by size descending: [640, 300, 64].
-        // Pick the first image whose width is ≤ 400px (targets the 300px variant).
-        // Falls back to the largest if no medium found (e.g., playlist mosaics
-        // that only have a single 640px image).
         let medium = first(where: { ($0.width ?? Int.max) <= 400 && ($0.width ?? 0) >= 100 })
         return (medium ?? first)?.url
     }
@@ -281,7 +284,7 @@ extension ArtistCodable {
         return APIArtist(
             id: id,
             genres: genres ?? [],
-            imageURL: images?.preferredURL.flatMap { URL(string: $0) },
+            images: images?.toImageSet ?? ImageSet.empty,
             name: name,
             uri: uri,
             externalUrl: externalUrls?.spotify,
@@ -338,7 +341,7 @@ struct AlbumCodable: Decodable {
             artistId: artist?.id,
             artistName: artist?.name ?? "Unknown",
             externalUrl: externalUrls?.spotify,
-            imageURL: images?.preferredURL.flatMap { URL(string: $0) },
+            images: images?.toImageSet ?? ImageSet.empty,
             name: name,
             releaseDate: releaseDate ?? "",
             totalDurationMs: totalDurationMs,
@@ -369,7 +372,7 @@ struct TrackCodable: Decodable {
         case previewUrl = "preview_url"
     }
 
-    func toAPITrack(addedAt: String? = nil, albumId: String? = nil, albumName: String? = nil, imageURL: URL? = nil) -> APITrack {
+    func toAPITrack(addedAt: String? = nil, albumId: String? = nil, albumName: String? = nil, images: ImageSet? = nil) -> APITrack {
         let artist = artists?.first
         return APITrack(
             id: id,
@@ -380,7 +383,7 @@ struct TrackCodable: Decodable {
             artistName: artist?.name ?? "Unknown",
             durationMs: durationMs,
             externalUrl: externalUrls?.spotify,
-            imageURL: imageURL ?? album?.images?.preferredURL.flatMap { URL(string: $0) },
+            images: images ?? album?.images?.toImageSet ?? ImageSet.empty,
             name: name,
             trackNumber: trackNumber,
             uri: uri,
@@ -428,7 +431,7 @@ struct PlaylistCodable: Decodable {
         return APIPlaylist(
             id: id,
             description: description,
-            imageURL: images?.preferredURL.flatMap { URL(string: $0) },
+            images: images?.toImageSet ?? ImageSet.empty,
             isPublic: `public`,
             name: name,
             ownerId: owner.id,
@@ -533,7 +536,7 @@ struct AlbumTracksCodable: Decodable {
             case externalUrls = "external_urls"
         }
 
-        func toAPITrack(albumId: String, albumName: String?, imageURL: URL?) -> APITrack {
+        func toAPITrack(albumId: String, albumName: String?, images: ImageSet) -> APITrack {
             let artist = artists?.first
             return APITrack(
                 id: id,
@@ -544,7 +547,7 @@ struct AlbumTracksCodable: Decodable {
                 artistName: artist?.name ?? "Unknown",
                 durationMs: durationMs,
                 externalUrl: externalUrls?.spotify,
-                imageURL: imageURL,
+                images: images,
                 name: name,
                 trackNumber: trackNumber,
                 uri: uri,

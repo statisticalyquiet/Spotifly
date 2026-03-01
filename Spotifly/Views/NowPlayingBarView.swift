@@ -14,6 +14,7 @@ struct NowPlayingBarView: View {
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
     @Environment(TrackService.self) private var trackService
     @Environment(PlaylistService.self) private var playlistService
+    @Environment(\.displayScale) private var displayScale
     @Bindable var playbackViewModel: PlaybackViewModel
     @ObservedObject var windowState: WindowState
 
@@ -164,7 +165,7 @@ struct NowPlayingBarView: View {
 
     private func albumArt(size: CGFloat) -> some View {
         Group {
-            if let url = currentTrack?.imageURL {
+            if let url = currentTrack?.images.url(for: size, scale: displayScale) {
                 let urlString = url.absoluteString
                 if let cachedImage = cachedAlbumArtImage, cachedAlbumArtURL == urlString {
                     // Use cached image
