@@ -10,14 +10,14 @@ import Security
 
 /// Manages secure storage of authentication tokens in the Keychain
 enum KeychainManager {
-    private static let service = "com.spotifly.oauth"
+    nonisolated private static let service = "com.spotifly.oauth"
     private static let accessTokenKey = "spotify_access_token"
     private static let refreshTokenKey = "spotify_refresh_token"
     private static let expiresAtKey = "spotify_expires_at"
 
     /// Shared keychain access group - allows both dev and release builds to access the same items
     /// Format: TeamID.groupName (must match keychain-access-groups in entitlements)
-    private static let accessGroup = "89S4HZY343.com.spotifly.keychain"
+    nonisolated private static let accessGroup = "89S4HZY343.com.spotifly.keychain"
 
     // MARK: - Public API
 
@@ -120,40 +120,19 @@ enum KeychainManager {
 
     /// Saves a custom Spotify Client ID to the keychain
     nonisolated static func saveCustomClientId(_ clientId: String) throws {
-        // Delete any existing item first
-        clearCustomClientId()
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.spotifly.config",
-            kSecAttrAccount as String: "spotify_custom_client_id",
-            kSecAttrAccessGroup as String: "89S4HZY343.com.spotifly.keychain",
-            kSecValueData as String: clientId.data(using: .utf8)!,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-        ]
-
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw KeychainError.saveFailed(status)
-        }
+        try save(
+            key: "spotify_custom_client_id",
+            data: clientId.data(using: .utf8)!,
+            service: "com.spotifly.config",
+        )
     }
 
     /// Loads the custom Spotify Client ID from the keychain, returns nil if not found
     nonisolated static func loadCustomClientId() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.spotifly.config",
-            kSecAttrAccount as String: "spotify_custom_client_id",
-            kSecAttrAccessGroup as String: "89S4HZY343.com.spotifly.keychain",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let data = result as? Data,
+        guard let data = load(
+            key: "spotify_custom_client_id",
+            service: "com.spotifly.config",
+        ),
               let clientId = String(data: data, encoding: .utf8)
         else {
             return nil
@@ -163,46 +142,59 @@ enum KeychainManager {
 
     /// Clears the custom Client ID from the keychain
     nonisolated static func clearCustomClientId() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.spotifly.config",
-            kSecAttrAccount as String: "spotify_custom_client_id",
-            kSecAttrAccessGroup as String: "89S4HZY343.com.spotifly.keychain",
-        ]
-        SecItemDelete(query as CFDictionary)
+        delete(key: "spotify_custom_client_id", service: "com.spotifly.config")
     }
 
     // MARK: - Private Keychain Operations
 
-    private static func save(key: String, data: Data) throws {
-        // Delete any existing item first
-        delete(key: key)
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecAttrAccessGroup as String: accessGroup,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-        ]
-
-        let status = SecItemAdd(query as CFDictionary, nil)
-
-        guard status == errSecSuccess else {
-            throw KeychainError.saveFailed(status)
-        }
+    nonisolated private static func save(key: String, data: Data) throws {
+        try save(key: key, data: data, service: service)
     }
 
-    private static func load(key: String) -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecAttrAccessGroup as String: accessGroup,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+    nonisolated private static func load(key: String) -> Data? {
+        load(key: key, service: service)
+    }
+
+    nonisolated private static func delete(key: String) {
+        delete(key: key, service: service)
+    }
+
+    nonisolated private static func save(key: String, data: Data, service: String) throws {
+        var addQuery = makeQuery(key: key, service: service)
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+
+        if addStatus == errSecSuccess {
+            return
+        }
+
+        if addStatus == errSecDuplicateItem {
+            let updateQuery = makeQuery(key: key, service: service)
+            // Update in place so Keychain keeps existing trusted app ACL entries.
+            let updateAttributes: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            ]
+
+            let updateStatus = SecItemUpdate(
+                updateQuery as CFDictionary,
+                updateAttributes as CFDictionary,
+            )
+            guard updateStatus == errSecSuccess else {
+                throw KeychainError.saveFailed(updateStatus)
+            }
+            return
+        }
+
+        throw KeychainError.saveFailed(addStatus)
+    }
+
+    nonisolated private static func load(key: String, service: String) -> Data? {
+        var query = makeQuery(key: key, service: service)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -214,15 +206,18 @@ enum KeychainManager {
         return result as? Data
     }
 
-    private static func delete(key: String) {
-        let query: [String: Any] = [
+    nonisolated private static func delete(key: String, service: String) {
+        let query = makeQuery(key: key, service: service)
+        SecItemDelete(query as CFDictionary)
+    }
+
+    nonisolated private static func makeQuery(key: String, service: String) -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecAttrAccessGroup as String: accessGroup,
         ]
-
-        SecItemDelete(query as CFDictionary)
     }
 }
 
