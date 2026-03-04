@@ -267,7 +267,6 @@ final class PlaybackViewModel {
         } else if !isPlaying, currentTrackUri == trackId {
             // Resume current track
             SpotifyPlayer.resume()
-            isPlaying = true
         } else {
             // Play new track
             await playTrack(trackId: trackId, accessToken: accessToken)
@@ -397,7 +396,6 @@ final class PlaybackViewModel {
         // Don't call syncPositionAnchor() - Rust returns 0 immediately after resume
         // Keep the current positionAnchorMs (correct from paused state), just update the time
         positionAnchorTime = CACurrentMediaTime()
-        isPlaying = true
         updateNowPlayingPosition()
     }
 
@@ -448,7 +446,6 @@ final class PlaybackViewModel {
                     SpotifyPlayer.resume()
                     // Keep current position anchor, just update time
                     self.positionAnchorTime = CACurrentMediaTime()
-                    self.isPlaying = true
                     self.updateNowPlayingPosition()
                 }
             }
@@ -489,7 +486,6 @@ final class PlaybackViewModel {
                     SpotifyPlayer.resume()
                     // Keep current position anchor, just update time
                     self.positionAnchorTime = CACurrentMediaTime()
-                    self.isPlaying = true
                 }
                 self.updateNowPlayingPosition()
             }

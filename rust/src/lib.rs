@@ -41,6 +41,7 @@ static DEVICE_ID: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 static SPIRC_READY: AtomicBool = AtomicBool::new(false);
 static IS_ACTIVE_DEVICE: AtomicBool = AtomicBool::new(false);
+static PLAYING_EVENT_SEQ: AtomicU64 = AtomicU64::new(0);
 static PLAYER_EVENT_TX: Lazy<Mutex<Option<mpsc::UnboundedSender<()>>>> =
     Lazy::new(|| Mutex::new(None));
 static QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
@@ -107,6 +108,10 @@ static CURRENT_DURATION_MS: AtomicU32 = AtomicU32::new(0);
 
 // Current track URI - for detecting same-track reconnects
 static CURRENT_TRACK_URI: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+// Current context URI - captured from SetQueue and cluster player state updates.
+// We keep the latest non-empty value to recover resume after reconnect.
+static CURRENT_CONTEXT_URI: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 // Connection state tracking - for transparency dashboard
 static RECONNECT_ATTEMPT: AtomicU32 = AtomicU32::new(0);
@@ -231,6 +236,14 @@ fn current_timestamp_ms() -> u64 {
 fn update_position(position_ms: u32) {
     POSITION_MS.store(position_ms, Ordering::SeqCst);
     POSITION_TIMESTAMP_MS.store(current_timestamp_ms(), Ordering::SeqCst);
+}
+
+fn update_current_context_uri(context_uri: &str) {
+    if context_uri.is_empty() {
+        return;
+    }
+    let mut context_guard = CURRENT_CONTEXT_URI.lock().unwrap();
+    *context_guard = Some(context_uri.to_string());
 }
 
 // Helper function to convert URL to URI
@@ -1139,6 +1152,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                             debug!("PlayerEvent::Playing at {}ms", position_ms);
                             IS_PLAYING.store(true, Ordering::SeqCst);
                             IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                            PLAYING_EVENT_SEQ.fetch_add(1, Ordering::SeqCst);
                             // Clear auto-resume flag - we're already playing
                             RESUME_AFTER_RECONNECT_UNTIL_MS.store(0, Ordering::SeqCst);
                             update_position(position_ms);
@@ -1271,6 +1285,7 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
                                 next_tracks.len(),
                                 prev_tracks.len()
                             );
+                            update_current_context_uri(&context_uri);
                             let cb_guard = SET_QUEUE_CALLBACK.lock().unwrap();
                             if let Some(callback) = *cb_guard {
                                 let cb = callback;
@@ -1496,6 +1511,7 @@ fn send_playback_state(player_state: &PlayerState) {
     let context_uri = &player_state.context_uri;
     if !context_uri.is_empty() {
         debug!("Context URI: {}", context_uri);
+        update_current_context_uri(context_uri);
     }
 
     let cb_guard = PLAYBACK_STATE_CALLBACK.lock().unwrap();
@@ -1612,6 +1628,7 @@ fn process_and_send_queue(player_state: PlayerState) {
     // Log context URI for queue processing too
     if !player_state.context_uri.is_empty() {
         debug!("Queue context URI: {}", player_state.context_uri);
+        update_current_context_uri(&player_state.context_uri);
     }
 
     let cb_guard = QUEUE_CALLBACK.lock().unwrap();
@@ -1952,6 +1969,86 @@ pub extern "C" fn spotifly_clear_audio_buffer() {
     proxy_sink::ProxySink::clear_buffer();
 }
 
+fn wait_for_playing_event(previous_seq: u64, timeout_ms: u64) -> bool {
+    let start_ms = current_timestamp_ms();
+    loop {
+        if PLAYING_EVENT_SEQ.load(Ordering::SeqCst) > previous_seq {
+            return true;
+        }
+        if current_timestamp_ms().saturating_sub(start_ms) >= timeout_ms {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn resume_via_load(spirc: &Arc<Spirc>) -> i32 {
+    let position_ms = POSITION_MS.load(Ordering::SeqCst);
+    let context_uri = CURRENT_CONTEXT_URI.lock().unwrap().clone();
+    let current_track_uri = CURRENT_TRACK_URI.lock().unwrap().clone();
+
+    if let Some(context_uri) = context_uri.filter(|uri| !uri.is_empty()) {
+        let playing_track = current_track_uri.clone().map(PlayingTrack::Uri);
+        debug!(
+            "Resume fallback: loading context {} at {}ms (track hint: {:?})",
+            context_uri, position_ms, playing_track
+        );
+
+        let load_request = LoadRequest::from_context_uri(
+            context_uri,
+            LoadRequestOptions {
+                start_playing: true,
+                seek_to: position_ms,
+                playing_track,
+                ..Default::default()
+            },
+        );
+
+        match spirc.load(load_request) {
+            Ok(_) => {
+                IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                return 0;
+            }
+            Err(e) => {
+                debug!("Resume fallback context load failed: {:?}", e);
+                if is_channel_closed_error(&e) {
+                    return ERROR_NEEDS_REINIT;
+                }
+            }
+        }
+    }
+
+    if let Some(track_uri) = current_track_uri.filter(|uri| !uri.is_empty()) {
+        debug!(
+            "Resume fallback: loading single track {} at {}ms",
+            track_uri, position_ms
+        );
+        let load_request = LoadRequest::from_tracks(
+            vec![track_uri],
+            LoadRequestOptions {
+                start_playing: true,
+                seek_to: position_ms,
+                ..Default::default()
+            },
+        );
+
+        match spirc.load(load_request) {
+            Ok(_) => {
+                IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                return 0;
+            }
+            Err(e) => {
+                debug!("Resume fallback track load failed: {:?}", e);
+                if is_channel_closed_error(&e) {
+                    return ERROR_NEEDS_REINIT;
+                }
+            }
+        }
+    }
+
+    ERROR_GENERAL
+}
+
 /// Resumes playback.
 /// Returns 0 on success, -1 on error, -2 if channel closed (needs reinit).
 #[no_mangle]
@@ -1960,22 +2057,51 @@ pub extern "C" fn spotifly_resume() -> i32 {
     if let Err(e) = require_session_connected() {
         return e;
     }
-    let spirc_guard = SPIRC.lock().unwrap();
-    match spirc_guard.as_ref() {
-        Some(spirc) => match spirc.play() {
-            Ok(_) => {
-                IS_PLAYING.store(true, Ordering::SeqCst);
-                0
-            }
-            Err(e) => {
-                debug!("Resume error: {:?}", e);
-                if is_channel_closed_error(&e) {
-                    ERROR_NEEDS_REINIT
-                } else {
-                    ERROR_GENERAL
+
+    if IS_PLAYING.load(Ordering::SeqCst) {
+        return 0;
+    }
+
+    let spirc = {
+        let spirc_guard = SPIRC.lock().unwrap();
+        spirc_guard.as_ref().cloned()
+    };
+
+    match spirc {
+        Some(spirc) => {
+            let play_seq_before = PLAYING_EVENT_SEQ.load(Ordering::SeqCst);
+            match spirc.play() {
+                Ok(_) => {
+                    if wait_for_playing_event(play_seq_before, 500) {
+                        return 0;
+                    }
+
+                    debug!(
+                        "Resume play() produced no Playing event within timeout; attempting load fallback"
+                    );
+                    let fallback_seq_before = PLAYING_EVENT_SEQ.load(Ordering::SeqCst);
+                    let load_result = resume_via_load(&spirc);
+                    if load_result != 0 {
+                        return load_result;
+                    }
+
+                    if wait_for_playing_event(fallback_seq_before, 2000) {
+                        0
+                    } else {
+                        debug!("Resume fallback load produced no Playing event within timeout");
+                        ERROR_GENERAL
+                    }
+                }
+                Err(e) => {
+                    debug!("Resume error: {:?}", e);
+                    if is_channel_closed_error(&e) {
+                        ERROR_NEEDS_REINIT
+                    } else {
+                        ERROR_GENERAL
+                    }
                 }
             }
-        },
+        }
         None => {
             debug!("Resume error: Spirc not initialized");
             ERROR_GENERAL
