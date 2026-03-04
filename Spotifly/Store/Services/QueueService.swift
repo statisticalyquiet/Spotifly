@@ -18,6 +18,7 @@ final class QueueService {
     private var queueSubscription: AnyCancellable?
     private var setQueueSubscription: AnyCancellable?
     private var metadataFetchTask: Task<Void, Never>?
+    private var pendingQueueRefreshTask: Task<Void, Never>?
     private var pendingTrackIds: Set<String> = []
     /// Subject for debouncing metadata fetch requests
     private let fetchSubject = PassthroughSubject<Void, Never>()
@@ -59,6 +60,21 @@ final class QueueService {
         let contextInfo = notification.contextUri.isEmpty ? "" : " context=\(notification.contextUri),"
         debugLog("QueueService", "Set queue:\(contextInfo) prev=\(notification.prevTracks.count), current=\(notification.currentTrack != nil ? 1 : 0), next=\(notification.nextTracks.count)")
 
+        // A SetQueue with a context URI but no tracks is provisional: librespot emits it during
+        // context setup before fill_up_next_tracks completes. Keep the existing queue and schedule
+        // a Web API refresh to recover the real state once Spotify's servers have it.
+        let isProvisional = !notification.contextUri.isEmpty
+            && notification.currentTrack == nil
+            && notification.nextTracks.isEmpty
+            && notification.prevTracks.isEmpty
+        if isProvisional {
+            debugLog("QueueService", "Provisional SetQueue (emitted before fill_up) — keeping existing queue, scheduling refresh")
+            scheduleQueueRefresh()
+            return
+        }
+
+        cancelPendingQueueRefresh()
+
         /// Convert to QueueEntries
         func toQueueEntry(_ trackInfo: SetQueueTrackInfo) -> QueueEntry? {
             guard let trackId = SpotifyAPI.parseTrackURI(trackInfo.uri) else { return nil }
@@ -79,6 +95,21 @@ final class QueueService {
         // Fetch track metadata for IDs not already in store
         let allIds = prevEntries.map(\.trackId) + (currentEntry.map { [$0.trackId] } ?? []) + nextEntries.map(\.trackId)
         fetchTrackMetadata(for: allIds)
+    }
+
+    private func scheduleQueueRefresh() {
+        pendingQueueRefreshTask?.cancel()
+        pendingQueueRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled, let self else { return }
+            let token = await self.tokenProvider()
+            await self.fetchInitialPlaybackState(accessToken: token)
+        }
+    }
+
+    private func cancelPendingQueueRefresh() {
+        pendingQueueRefreshTask?.cancel()
+        pendingQueueRefreshTask = nil
     }
 
     /// Handle queue update from Spirc callback (Mercury protocol)
@@ -106,6 +137,11 @@ final class QueueService {
         }
 
         store.setQueue(previous: previousEntries, current: currentEntry, next: nextEntries)
+
+        // Real queue arrived — cancel any pending Web API refresh
+        if !nextEntries.isEmpty {
+            cancelPendingQueueRefresh()
+        }
 
         // Fetch track metadata for IDs not already in store
         let allIds = (previousEntries ?? []).map(\.trackId) + (currentEntry.map { [$0.trackId] } ?? []) + nextEntries.map(\.trackId)

@@ -1402,9 +1402,9 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
 
     match create_and_store_spirc(&session, &credentials, player, mixer).await {
         Ok(spirc) => {
-            match spirc.transfer(None) {
+            match spirc.activate() {
                 Ok(_) => IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst),
-                Err(e) => debug!("Auto-activation via transfer failed: {:?}", e),
+                Err(e) => debug!("Auto-activation failed: {:?}", e),
             }
             notify_connection_state_change();
         }
@@ -2343,6 +2343,7 @@ pub extern "C" fn spotifly_play_radio(track_uri: *const c_char) -> i32 {
                 LoadRequestOptions {
                     start_playing: true,
                     seek_to: 0,
+                    playing_track: Some(PlayingTrack::Uri(uri_str.clone())),
                     ..Default::default()
                 },
             );
