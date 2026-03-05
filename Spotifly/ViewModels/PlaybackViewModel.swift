@@ -437,16 +437,8 @@ final class PlaybackViewModel {
         commandCenter.playCommand.addTarget { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                // During reconnection, session may not be fully connected yet
-                guard SpotifyPlayer.isSessionConnected else {
-                    debugLog("PlaybackViewModel", "Media key play ignored - session not connected yet")
-                    return
-                }
                 if !self.isPlaying {
-                    SpotifyPlayer.resume()
-                    // Keep current position anchor, just update time
-                    self.positionAnchorTime = CACurrentMediaTime()
-                    self.updateNowPlayingPosition()
+                    self.resume()
                 }
             }
             return .success
@@ -456,15 +448,8 @@ final class PlaybackViewModel {
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                // During reconnection, session may not be fully connected yet
-                guard SpotifyPlayer.isSessionConnected else {
-                    debugLog("PlaybackViewModel", "Media key pause ignored - session not connected yet")
-                    return
-                }
                 if self.isPlaying {
-                    SpotifyPlayer.pause()
-                    self.isPlaying = false
-                    self.updateNowPlayingPosition()
+                    self.pause()
                 }
             }
             return .success
@@ -474,20 +459,11 @@ final class PlaybackViewModel {
         commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                // During reconnection, session may not be fully connected yet
-                guard SpotifyPlayer.isSessionConnected else {
-                    debugLog("PlaybackViewModel", "Media key toggle ignored - session not connected yet")
-                    return
-                }
                 if self.isPlaying {
-                    SpotifyPlayer.pause()
-                    self.isPlaying = false
+                    self.pause()
                 } else {
-                    SpotifyPlayer.resume()
-                    // Keep current position anchor, just update time
-                    self.positionAnchorTime = CACurrentMediaTime()
+                    self.resume()
                 }
-                self.updateNowPlayingPosition()
             }
             return .success
         }
