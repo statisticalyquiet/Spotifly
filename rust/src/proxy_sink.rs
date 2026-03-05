@@ -25,8 +25,7 @@ const AUDIO_CONTROL_STOP: u8 = 0;
 const AUDIO_CONTROL_START: u8 = 1;
 const AUDIO_CONTROL_CLEAR: u8 = 2;
 
-static AUDIO_DATA_CALLBACK: Lazy<Mutex<Option<AudioDataCallback>>> =
-    Lazy::new(|| Mutex::new(None));
+static AUDIO_DATA_CALLBACK: Lazy<Mutex<Option<AudioDataCallback>>> = Lazy::new(|| Mutex::new(None));
 
 static AUDIO_CONTROL_CALLBACK: Lazy<Mutex<Option<AudioControlCallback>>> =
     Lazy::new(|| Mutex::new(None));

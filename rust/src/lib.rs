@@ -539,13 +539,15 @@ fn notify_connection_state_change() {
 }
 
 /// Creates a new (unconnected) Session with the given device ID and access token.
-fn create_session(device_id: &str, access_token: &str) -> Result<(Session, librespot_core::authentication::Credentials), String> {
+fn create_session(
+    device_id: &str,
+    access_token: &str,
+) -> Result<(Session, librespot_core::authentication::Credentials), String> {
     let session_config = SessionConfig {
         device_id: device_id.to_string(),
         ..Default::default()
     };
-    let credentials =
-        librespot_core::authentication::Credentials::with_access_token(access_token);
+    let credentials = librespot_core::authentication::Credentials::with_access_token(access_token);
     let cache = Cache::new(None::<std::path::PathBuf>, None, None, None)
         .map_err(|e| format!("Cache error: {}", e))?;
     let session = Session::new(session_config, Some(cache));
@@ -622,10 +624,7 @@ fn spawn_cluster_listener(session: &Session, generation: u64) -> Result<(), Stri
         .map_err(|e| format!("Failed to subscribe to cluster updates: {}", e))?;
 
     RUNTIME.spawn(async move {
-        debug!(
-            "Cluster listener started (generation={})",
-            generation
-        );
+        debug!("Cluster listener started (generation={})", generation);
         let mut stream = queue_stream;
         while let Some(msg_result) = stream.next().await {
             match msg_result {
@@ -643,10 +642,7 @@ fn spawn_cluster_listener(session: &Session, generation: u64) -> Result<(), Stri
             }
         }
 
-        debug!(
-            "Cluster listener ended (generation={})",
-            generation
-        );
+        debug!("Cluster listener ended (generation={})", generation);
 
         let current_gen = SESSION_GENERATION.load(Ordering::SeqCst);
         if generation != current_gen {
@@ -700,6 +696,7 @@ fn spawn_reconnection_loop() {
 
     RUNTIME.spawn(async {
         let was_playing = IS_PLAYING.load(Ordering::SeqCst);
+        let was_active = IS_ACTIVE_DEVICE.load(Ordering::SeqCst);
 
         let delays = [0u64, 2, 5, 10, 30, 30, 30, 30, 30, 30];
 
@@ -741,7 +738,7 @@ fn spawn_reconnection_loop() {
             if PLAYER.lock().unwrap().is_some() {
                 do_soft_reconnect_cleanup();
 
-                match soft_reconnect_async(&token).await {
+                match soft_reconnect_async(&token, was_active).await {
                     Ok(_) => {
                         debug!("[WAKE +{}ms] Soft reconnect successful on attempt {}", elapsed_since_wake_ms(), attempt + 1);
                         RECONNECTING.store(false, Ordering::SeqCst);
@@ -757,7 +754,7 @@ fn spawn_reconnection_loop() {
             // Hard reconnect: full cleanup and rebuild
             do_reconnect_cleanup();
 
-            match init_player_async(&token).await {
+            match init_player_async(&token, was_active).await {
                 Ok(_) => {
                     debug!("[WAKE +{}ms] Hard reconnect successful on attempt {}", elapsed_since_wake_ms(), attempt + 1);
                     RECONNECTING.store(false, Ordering::SeqCst);
@@ -945,7 +942,10 @@ fn do_soft_reconnect_cleanup() {
 
 /// Soft reconnect: creates new Session + Spirc while keeping the existing
 /// Player and Mixer alive. Audio continues playing during reconnection.
-async fn soft_reconnect_async(access_token: &str) -> Result<(), String> {
+async fn soft_reconnect_async(
+    access_token: &str,
+    reactivate_after_reconnect: bool,
+) -> Result<(), String> {
     let current_generation = SESSION_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     EVENT_LISTENER_GENERATION.store(current_generation, Ordering::SeqCst);
     debug!(
@@ -985,11 +985,16 @@ async fn soft_reconnect_async(access_token: &str) -> Result<(), String> {
     spawn_cluster_listener(&session, current_generation)?;
     let spirc = create_and_store_spirc(&session, &credentials, player, mixer).await?;
 
-    // Use activate() instead of transfer(None) -- the Player is already
-    // playing the correct track so we just need to re-register as active.
-    match spirc.activate() {
-        Ok(_) => IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst),
-        Err(e) => debug!("Soft reconnect: activate failed: {:?}", e),
+    // Re-activate only if we were active before disconnect.
+    // If we had just transferred to another device, stay passive.
+    if reactivate_after_reconnect {
+        match spirc.activate() {
+            Ok(_) => IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst),
+            Err(e) => debug!("Soft reconnect: activate failed: {:?}", e),
+        }
+    } else {
+        IS_ACTIVE_DEVICE.store(false, Ordering::SeqCst);
+        debug!("Soft reconnect: keeping Spotifly inactive (was_active=false)");
     }
 
     notify_connection_state_change();
@@ -1041,7 +1046,7 @@ pub extern "C" fn spotifly_init_player(access_token: *const c_char) -> i32 {
         }
     }
 
-    let result = RUNTIME.block_on(async { init_player_async(&token_str).await });
+    let result = RUNTIME.block_on(async { init_player_async(&token_str, false).await });
 
     match result {
         Ok(_) => 0,
@@ -1098,7 +1103,7 @@ fn create_new_player(session: &Session, mixer: &Arc<SoftMixer>) -> Result<Arc<Pl
     Ok(player)
 }
 
-async fn init_player_async(access_token: &str) -> Result<(), String> {
+async fn init_player_async(access_token: &str, activate_after_connect: bool) -> Result<(), String> {
     // Increment session generation - this invalidates any old cluster listeners
     let current_generation = SESSION_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     debug!(
@@ -1417,9 +1422,15 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
 
     match create_and_store_spirc(&session, &credentials, player, mixer).await {
         Ok(spirc) => {
-            match spirc.activate() {
-                Ok(_) => IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst),
-                Err(e) => debug!("Auto-activation failed: {:?}", e),
+            // Passive startup by default: do not take over the active device on launch.
+            // Re-activate only when reconnecting from a previously-active local session.
+            if activate_after_connect {
+                match spirc.activate() {
+                    Ok(_) => IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst),
+                    Err(e) => debug!("Auto-activation failed: {:?}", e),
+                }
+            } else {
+                IS_ACTIVE_DEVICE.store(false, Ordering::SeqCst);
             }
             notify_connection_state_change();
         }
