@@ -212,12 +212,16 @@ struct LoggedInView: View {
             await queueService.fetchInitialPlaybackState(accessToken: token)
         }
         .onReceive(SpotifyPlayer.sessionConnected) {
-            // Refresh playback state and devices after session reconnects
-            // This handles the case where we transferred playback to another device,
-            // the session disconnected, and now we've reconnected
+            // Refresh playback state and devices after session reconnects.
+            // After a transfer the Web API returns stale data for a few seconds,
+            // so we delay the playback fetch to let the server catch up.
             Task {
                 let token = await session.validAccessToken()
+                await deviceService.waitForTransferSettling()
                 await queueService.fetchInitialPlaybackState(accessToken: token)
+            }
+            Task {
+                let token = await session.validAccessToken()
                 await deviceService.loadDevices(accessToken: token)
             }
         }

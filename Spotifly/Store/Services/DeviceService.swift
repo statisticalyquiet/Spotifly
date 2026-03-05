@@ -14,6 +14,10 @@ final class DeviceService {
     private let store: AppStore
     private var loadDevicesTask: Task<Void, Never>?
 
+    /// Timestamp of the last outgoing transfer, used to delay the
+    /// `fetchInitialPlaybackState` that fires on reconnect (Web API is stale).
+    private var lastTransferTime: ContinuousClock.Instant?
+
     init(store: AppStore) {
         self.store = store
     }
@@ -61,6 +65,9 @@ final class DeviceService {
     /// Uses native Spotify Connect protocol for seamless handoff.
     /// Returns true if transfer succeeded (caller should activate Connect mode)
     func transferPlayback(to device: Device, accessToken: String) async -> Bool {
+        // Record transfer time so sessionConnected handler can delay its Web API fetch
+        lastTransferTime = .now
+
         // Optimistically mark the target device as active for immediate UI feedback
         store.setActiveDevice(device.id)
 
@@ -83,6 +90,17 @@ final class DeviceService {
         }
 
         return true
+    }
+
+    /// Waits if a transfer happened recently, giving the Web API time to reflect the new state.
+    /// Call before `fetchInitialPlaybackState` on reconnect.
+    func waitForTransferSettling() async {
+        guard let transferTime = lastTransferTime else { return }
+        let elapsed = transferTime.duration(to: .now)
+        let staleWindow = Duration.seconds(5)
+        if elapsed < staleWindow {
+            try? await Task.sleep(for: staleWindow - elapsed)
+        }
     }
 
     // MARK: - Helpers
