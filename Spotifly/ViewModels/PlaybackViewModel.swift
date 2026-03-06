@@ -735,18 +735,26 @@ final class PlaybackViewModel {
             trackDurationMs = UInt32(durationMs)
         }
 
-        // Set position anchor accounting for elapsed time since the API timestamp
+        // Set position anchor accounting for elapsed time since the API timestamp.
+        // The API timestamp is when Spotify last received a state change — it can be
+        // arbitrarily stale during uninterrupted playback. If compensation would push
+        // the position past the track end, discard it and anchor at progress_ms directly.
         if progressMs >= 0 {
             let posMs = UInt32(progressMs)
             let now = CACurrentMediaTime()
 
             if timestampMs > 0 {
                 let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-                let elapsedSinceTimestamp = max(0, nowMs - timestampMs)
-                let elapsedSeconds = Double(elapsedSinceTimestamp) / 1000.0
-                debugLog("PlaybackViewModel", "Web API position anchor: \(posMs)ms (timestamp was \(elapsedSinceTimestamp)ms ago)")
+                let elapsedMs = max(0, nowMs - timestampMs)
+                let compensated = Int64(progressMs) + elapsedMs
+                let stale = durationMs > 0 && compensated > Int64(durationMs)
+                if stale {
+                    debugLog("PlaybackViewModel", "Web API position anchor: \(posMs)ms (timestamp was \(elapsedMs)ms ago, stale — ignoring compensation)")
+                } else {
+                    debugLog("PlaybackViewModel", "Web API position anchor: \(posMs)ms (timestamp was \(elapsedMs)ms ago)")
+                }
                 positionAnchorMs = posMs
-                positionAnchorTime = now - elapsedSeconds
+                positionAnchorTime = stale ? now : now - Double(elapsedMs) / 1000.0
             } else {
                 positionAnchorMs = posMs
                 positionAnchorTime = now
