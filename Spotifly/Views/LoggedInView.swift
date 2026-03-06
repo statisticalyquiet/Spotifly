@@ -212,17 +212,14 @@ struct LoggedInView: View {
             await queueService.fetchInitialPlaybackState(accessToken: token)
         }
         .onReceive(SpotifyPlayer.sessionConnected) {
-            // Refresh playback state and devices after session reconnects.
+            // Refresh playback state after session reconnects.
             // After a transfer the Web API returns stale data for a few seconds,
-            // so we delay the playback fetch to let the server catch up.
+            // so we delay the fetch to let the server catch up.
+            // Device active state is now updated via the cluster callback, no HTTP needed here.
             Task {
                 let token = await session.validAccessToken()
                 await deviceService.waitForTransferSettling()
                 await queueService.fetchInitialPlaybackState(accessToken: token)
-            }
-            Task {
-                let token = await session.validAccessToken()
-                deviceService.scheduleLoad(accessToken: token)
             }
         }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)) { _ in
