@@ -64,6 +64,7 @@ static SET_QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
 static ACTIVE_DEVICE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
+static LAST_ACTIVE_DEVICE_ID: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Token request callback - Rust requests fresh token from Swift for reconnection
@@ -535,12 +536,21 @@ fn mark_disconnected(reason: &str) {
     notify_connection_state_change();
 }
 
-/// Sends the active device ID to the registered callback.
-/// Fires on every cluster update so Swift can track active device changes without HTTP polls.
+/// Sends the active device ID to the registered callback if it changed since the last update.
+/// Called on every cluster update — deduplicates so Swift only sees actual changes.
 fn notify_active_device_id(device_id: &str) {
     if device_id.is_empty() {
         return;
     }
+
+    // Only notify if the active device actually changed
+    let mut last = LAST_ACTIVE_DEVICE_ID.lock().unwrap();
+    if *last == device_id {
+        return;
+    }
+    *last = device_id.to_string();
+    drop(last);
+
     let cb_guard = ACTIVE_DEVICE_CALLBACK.lock().unwrap();
     if let Some(callback) = *cb_guard {
         let cb = callback;
@@ -2276,6 +2286,10 @@ pub extern "C" fn spotifly_cleanup() {
     POSITION_MS.store(0, Ordering::SeqCst);
     POSITION_TIMESTAMP_MS.store(0, Ordering::SeqCst);
     LAST_VOLUME.store(0, Ordering::SeqCst);
+    {
+        let mut last_device = LAST_ACTIVE_DEVICE_ID.lock().unwrap();
+        last_device.clear();
+    }
 
     // Reset session connection state
     {

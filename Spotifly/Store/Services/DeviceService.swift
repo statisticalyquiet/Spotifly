@@ -34,7 +34,6 @@ final class DeviceService {
                 Task { await self?.loadDevices(accessToken: token) }
             }
         activeDeviceCancellable = SpotifyPlayer.activeDeviceChanged
-            .receive(on: DispatchQueue.main)
             .sink { [weak self] deviceId in
                 self?.store.setActiveDevice(deviceId)
             }
