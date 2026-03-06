@@ -1747,17 +1747,18 @@ fn process_and_send_queue(player_state: PlayerState) {
 }
 
 /// Helper to ensure the device is active before loading content.
-/// If not active, transfers playback to this device first (which activates it).
+/// If not active, activates via Spirc directly (no spclient HTTP needed).
 /// Returns Ok(()) if ready to load, Err(i32) with error code if activation failed.
 fn ensure_active_for_playback(spirc: &Arc<Spirc>) -> Result<(), i32> {
     if !IS_ACTIVE_DEVICE.load(Ordering::SeqCst) {
-        debug!("Device not active, activating via transfer before load");
-        match spirc.transfer(None) {
+        debug!("Device not active, activating via spirc.activate()");
+        match spirc.activate() {
             Ok(_) => {
-                debug!("Transfer (activate) succeeded");
+                debug!("Activate succeeded");
+                IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
             }
             Err(_e) => {
-                debug!("Transfer (activate) failed: {:?}", _e);
+                debug!("Activate failed: {:?}", _e);
                 return Err(-1);
             }
         }

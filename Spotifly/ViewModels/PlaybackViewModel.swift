@@ -153,18 +153,10 @@ final class PlaybackViewModel {
             isInitialized = true
 
             // Wait for Spirc to be ready (poll with timeout)
-            var spircReady = false
             for _ in 0 ..< 50 { // 5 seconds max
-                if SpotifyPlayer.isSpircReady {
-                    spircReady = true
-                    break
-                }
+                if SpotifyPlayer.isSpircReady { break }
                 try? await Task.sleep(for: .milliseconds(100))
             }
-
-            // Note: We don't auto-transfer on init anymore.
-            // When the user plays something, the Rust layer auto-activates via transfer before load.
-            _ = spircReady // Acknowledge we waited for Spirc to be ready
         } catch {
             errorMessage = error.localizedDescription
         }
