@@ -73,9 +73,17 @@ final class PlaybackViewModel {
             guard !isSettingVolumeLocally else { return }
             // Debounce volume changes to avoid flooding Spirc with requests
             volumeSubject.send(volume)
-            saveVolume()
+            // Only persist when Spotifly is the active device; don't overwrite local volume
+            // with a remote device's volume if the user is dragging the slider in Connect mode.
+            if remoteVolume == nil {
+                saveVolume()
+            }
         }
     }
+
+    /// Volume of the active remote Spotify Connect device (nil when Spotifly is active).
+    /// The volume slider uses this for display when set.
+    var remoteVolume: Double?
 
     /// Favorite status of currently playing track
     var isCurrentTrackFavorited = false
@@ -577,7 +585,10 @@ final class PlaybackViewModel {
                 isSettingVolumeLocally = true
                 volume = normalizedVolume
                 isSettingVolumeLocally = false
-                saveVolume()
+                // Only persist when Spotifly is the active device
+                if remoteVolume == nil {
+                    saveVolume()
+                }
             }
     }
 
@@ -886,6 +897,32 @@ final class PlaybackViewModel {
 
     private func saveVolume() {
         UserDefaults.standard.set(volume, forKey: "playbackVolume")
+    }
+
+    // MARK: - Remote Device Volume Sync
+
+    /// Call when Spotifly becomes the active device.
+    /// Clears remote volume mode and restores the saved local volume.
+    func becameLocalActiveDevice() {
+        remoteVolume = nil
+        let saved = UserDefaults.standard.double(forKey: "playbackVolume")
+        guard saved > 0, volume != saved else { return }
+        isSettingVolumeLocally = true
+        volume = saved
+        isSettingVolumeLocally = false
+        SpotifyPlayer.setVolume(volume)
+    }
+
+    /// Call when a remote Spotify Connect device becomes active.
+    /// Sets remote volume mode so the slider reflects that device's volume.
+    func becameRemoteActiveDevice(volumePercent: Int?) {
+        remoteVolume = volumePercent.map { Double($0) / 100.0 }
+    }
+
+    /// Call when the active remote device's volume is refreshed from HTTP.
+    func remoteDeviceVolumeUpdated(_ volumePercent: Int) {
+        guard remoteVolume != nil else { return }
+        remoteVolume = Double(volumePercent) / 100.0
     }
 
     /// Subscribe to debounced volume changes

@@ -302,6 +302,17 @@ struct LoggedInView: View {
         .searchable(text: $searchText, isPresented: $searchFieldFocused)
         .onSubmit(of: .search) { performSearch() }
         .onChange(of: searchText) { _, newValue in handleSearchTextChange(newValue) }
+        .onChange(of: store.activeDeviceId) { _, newId in
+            if newId == nil || newId == store.ownDeviceId {
+                playbackViewModel.becameLocalActiveDevice()
+            } else {
+                playbackViewModel.becameRemoteActiveDevice(volumePercent: store.activeDevice?.volumePercent)
+            }
+        }
+        .onChange(of: store.activeDevice?.volumePercent) { _, newPercent in
+            guard let newPercent, store.activeDeviceId != store.ownDeviceId else { return }
+            playbackViewModel.remoteDeviceVolumeUpdated(newPercent)
+        }
         .toolbar { refreshToolbarItem }
     }
 

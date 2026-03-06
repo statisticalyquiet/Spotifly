@@ -350,12 +350,27 @@ struct NowPlayingBarView: View {
         .buttonStyle(.plain)
     }
 
-    /// Unified volume (0-100 scale)
+    /// Unified volume (0-100 scale).
+    /// Uses the remote device's volume when Spotify Connect is active, otherwise local.
     private var currentVolume: Double {
-        playbackViewModel.volume * 100
+        (playbackViewModel.remoteVolume ?? playbackViewModel.volume) * 100
+    }
+
+    private var volumeIconName: String {
+        if currentVolume == 0 {
+            "speaker.fill"
+        } else if currentVolume < 50 {
+            "speaker.wave.1.fill"
+        } else {
+            "speaker.wave.3.fill"
+        }
     }
 
     private func setVolume(_ volume: Double) {
+        // Optimistically update remoteVolume for immediate slider feedback
+        if playbackViewModel.remoteVolume != nil {
+            playbackViewModel.remoteVolume = volume / 100
+        }
         playbackViewModel.volume = volume / 100
     }
 
@@ -363,7 +378,7 @@ struct NowPlayingBarView: View {
         Button {
             showVolumePopover.toggle()
         } label: {
-            Image(systemName: currentVolume == 0 ? "speaker.fill" : currentVolume < 50 ? "speaker.wave.1.fill" : "speaker.wave.3.fill")
+            Image(systemName: volumeIconName)
                 .font(.body)
                 .foregroundStyle(.secondary)
         }
