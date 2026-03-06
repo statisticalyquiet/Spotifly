@@ -314,9 +314,15 @@ final class AppStore {
 
     /// Upsert devices
     func upsertDevices(_ newDevices: [Device]) {
+        let currentActiveId = activeDeviceId
         devices.removeAll()
         for device in newDevices {
             devices[device.id] = device
+        }
+        // Preserve our tracked active device — HTTP data may lag behind after transfers.
+        // On first load (currentActiveId == nil) the HTTP is_active field is used as-is.
+        if let currentActiveId, devices[currentActiveId] != nil {
+            setActiveDevice(currentActiveId)
         }
     }
 

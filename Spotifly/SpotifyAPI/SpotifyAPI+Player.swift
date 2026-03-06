@@ -263,6 +263,43 @@ extension SpotifyAPI {
         }
     }
 
+    /// Sets the playback volume on the active device via Web API.
+    /// Use this when controlling a remote device (not the local Spirc).
+    /// - Parameters:
+    ///   - accessToken: The access token for authentication
+    ///   - percent: Volume level 0–100
+    static func setVolume(accessToken: String, percent: Int) async throws {
+        let percent = max(0, min(100, percent))
+        let urlString = "\(baseURL)/me/player/volume?volume_percent=\(percent)"
+
+        #if DEBUG
+            debugLog("SpotifyAPI", "[PUT] \(urlString)")
+        #endif
+
+        guard let url = URL(string: urlString) else {
+            throw SpotifyAPIError.invalidURI
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SpotifyAPIError.invalidResponse
+        }
+
+        switch httpResponse.statusCode {
+        case 200, 204:
+            return // Success
+        case 401:
+            throw SpotifyAPIError.unauthorized
+        default:
+            try throwAPIError(data: data, statusCode: httpResponse.statusCode)
+        }
+    }
+
     // MARK: - Playback State
 
     /// Response from GET /me/player

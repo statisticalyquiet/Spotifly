@@ -895,7 +895,15 @@ final class PlaybackViewModel {
             .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
             .sink { [weak self] newVolume in
                 guard let self, isInitialized else { return }
-                SpotifyPlayer.setVolume(newVolume)
+                if SpotifyPlayer.isActiveDevice {
+                    SpotifyPlayer.setVolume(newVolume)
+                } else {
+                    let percent = Int((newVolume * 100).rounded())
+                    Task { [weak self] in
+                        guard let token = await self?.tokenProvider?() else { return }
+                        try? await SpotifyAPI.setVolume(accessToken: token, percent: percent)
+                    }
+                }
             }
     }
 }
