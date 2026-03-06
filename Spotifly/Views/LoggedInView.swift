@@ -222,7 +222,7 @@ struct LoggedInView: View {
             }
             Task {
                 let token = await session.validAccessToken()
-                await deviceService.loadDevices(accessToken: token)
+                deviceService.scheduleLoad(accessToken: token)
             }
         }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)) { _ in

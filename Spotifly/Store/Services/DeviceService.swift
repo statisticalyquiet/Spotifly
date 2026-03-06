@@ -6,6 +6,7 @@
 //  Handles API calls and updates AppStore on success.
 //
 
+import Combine
 import Foundation
 
 @MainActor
@@ -18,17 +19,34 @@ final class DeviceService {
     /// `fetchInitialPlaybackState` that fires on reconnect (Web API is stale).
     private var lastTransferTime: ContinuousClock.Instant?
 
+    /// Subject for event-driven load requests. Throttled so that bursts of triggers
+    /// (e.g. sessionConnected firing right after the post-transfer delay) collapse
+    /// into a single HTTP request.
+    @ObservationIgnored private let loadSubject = PassthroughSubject<String, Never>()
+    @ObservationIgnored private var loadCancellable: AnyCancellable?
+
     init(store: AppStore) {
         self.store = store
+        loadCancellable = loadSubject
+            .throttle(for: .seconds(10), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] token in
+                Task { await self?.loadDevices(accessToken: token) }
+            }
     }
 
     // MARK: - Device Loading
 
-    /// Load available Spotify Connect devices
-    /// Uses stored task pattern to handle view recreation (e.g., sidebar width changes)
+    /// Schedules an event-driven device list refresh, throttled to at most once per 10 seconds.
+    /// Use for automatic triggers (sessionConnected, post-transfer confirmation).
+    func scheduleLoad(accessToken: String) {
+        loadSubject.send(accessToken)
+    }
+
+    /// Loads available Spotify Connect devices immediately (no throttle).
+    /// Use for user-initiated refreshes (SpeakersView opening, pull-to-refresh).
     func loadDevices(accessToken: String) async {
-        // If already loading, await existing task instead of skipping
-        // This handles view recreation where .task fires again
+        // If already loading, await existing task instead of starting a new one.
+        // This handles view recreation where .task fires again before loading finishes.
         if let existingTask = loadDevicesTask {
             await existingTask.value
             return
@@ -46,7 +64,6 @@ final class DeviceService {
             do {
                 let response = try await SpotifyAPI.fetchAvailableDevices(accessToken: accessToken)
                 self.store.upsertDevices(response.devices)
-                // activeDeviceId is now computed from devices, no need to set it
             } catch is CancellationError {
                 // Task was cancelled (e.g., view dismissed) - don't show error
             } catch let error as SpotifyAPIError {
@@ -61,7 +78,7 @@ final class DeviceService {
 
     // MARK: - Playback Transfer
 
-    /// Transfer playback to a specific device
+    /// Transfer playback to a specific device.
     /// Uses native Spotify Connect protocol for seamless handoff.
     /// Returns true if transfer succeeded (caller should activate Connect mode)
     func transferPlayback(to device: Device, accessToken: String) async -> Bool {
@@ -82,11 +99,12 @@ final class DeviceService {
             SpotifyPlayer.transferPlayback(to: device.id)
         }
 
-        // Schedule a delayed refresh to confirm the state
-        // (Web API returns stale data immediately after transfer)
+        // Schedule a throttled refresh after the transfer settles.
+        // Using scheduleLoad means the sessionConnected-triggered load that fires
+        // ~250ms later collapses into this one via the 10s throttle window.
         Task {
             try? await Task.sleep(for: .milliseconds(750))
-            await loadDevices(accessToken: accessToken)
+            scheduleLoad(accessToken: accessToken)
         }
 
         return true
