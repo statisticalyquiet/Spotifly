@@ -54,7 +54,7 @@ final class ConnectionService {
             connectedSince: connectedSince,
             spircReady: state.spircReady,
             reconnectAttempts: state.reconnectAttempt,
-            lastError: state.lastError,
+            lastError: state.sessionConnected ? nil : state.lastError,
         )
     }
 }
