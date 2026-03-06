@@ -433,6 +433,22 @@ private nonisolated func handleSessionConnectedCallback() {
 /// Weak reference to the SpotifySession for token requests during reconnection
 private nonisolated(unsafe) var tokenProviderSession: SpotifySession?
 
+/// Registers the active device callback with Rust (fires on every cluster update)
+private nonisolated func registerActiveDeviceCallback() {
+    spotifly_register_active_device_callback { deviceIdPtr in
+        handleActiveDeviceCallback(deviceIdPtr)
+    }
+}
+
+/// C callback for active device ID changes from cluster updates
+private nonisolated func handleActiveDeviceCallback(_ deviceIdPtr: UnsafePointer<CChar>?) {
+    guard let deviceIdPtr else { return }
+    let deviceId = String(cString: deviceIdPtr)
+    DispatchQueue.main.async {
+        activeDeviceSubject.send(deviceId)
+    }
+}
+
 /// Registers the token request callback with Rust (fires when reconnection needs a fresh token)
 private nonisolated func registerTokenRequestCallback() {
     spotifly_register_token_request_callback {
@@ -668,6 +684,9 @@ private nonisolated(unsafe) let sessionDisconnectedSubject = PassthroughSubject<
 /// Global subject for session connection (ready for commands)
 private nonisolated(unsafe) let sessionConnectedSubject = PassthroughSubject<Void, Never>()
 
+/// Global subject for active device ID changes (from cluster updates)
+private nonisolated(unsafe) let activeDeviceSubject = PassthroughSubject<String, Never>()
+
 /// Swift wrapper for the Rust librespot playback functionality
 enum SpotifyPlayer {
     /// Initializes the player with the given access token.
@@ -688,6 +707,7 @@ enum SpotifyPlayer {
         registerSessionConnectedCallback()
         registerSessionClientChangedCallback()
         registerConnectionStateCallback()
+        registerActiveDeviceCallback()
         registerTokenRequestCallback()
 
         // Sync playback settings from UserDefaults before initializing
@@ -762,6 +782,12 @@ enum SpotifyPlayer {
     /// Subscribe to this to enable playback controls after initialization or reconnection.
     static var sessionConnected: AnyPublisher<Void, Never> {
         sessionConnectedSubject.eraseToAnyPublisher()
+    }
+
+    /// Returns a publisher that emits the active device ID on every cluster update.
+    /// Use this to track which Spotify Connect device is active without polling the Web API.
+    static var activeDeviceChanged: AnyPublisher<String, Never> {
+        activeDeviceSubject.eraseToAnyPublisher()
     }
 
     /// Returns a publisher for session client changed notifications.

@@ -62,6 +62,8 @@ static SESSION_CLIENT_CHANGED_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c
     Lazy::new(|| Mutex::new(None));
 static SET_QUEUE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
     Lazy::new(|| Mutex::new(None));
+static ACTIVE_DEVICE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>> =
+    Lazy::new(|| Mutex::new(None));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
 
 // Token request callback - Rust requests fresh token from Swift for reconnection
@@ -400,6 +402,16 @@ pub extern "C" fn spotifly_register_set_queue_callback(callback: extern "C" fn(*
     *cb = Some(callback);
 }
 
+/// Registers a callback to receive active device ID changes from cluster updates.
+/// Called on every cluster update with the current active device ID string.
+#[no_mangle]
+pub extern "C" fn spotifly_register_active_device_callback(
+    callback: extern "C" fn(*const c_char),
+) {
+    let mut cb = ACTIVE_DEVICE_CALLBACK.lock().unwrap();
+    *cb = Some(callback);
+}
+
 /// Registers a callback for token requests during reconnection.
 /// When Rust needs a fresh token to reconnect, it calls this callback.
 /// Swift should respond by calling spotifly_set_token() with a fresh access token.
@@ -523,6 +535,22 @@ fn mark_disconnected(reason: &str) {
     notify_connection_state_change();
 }
 
+/// Sends the active device ID to the registered callback.
+/// Fires on every cluster update so Swift can track active device changes without HTTP polls.
+fn notify_active_device_id(device_id: &str) {
+    if device_id.is_empty() {
+        return;
+    }
+    let cb_guard = ACTIVE_DEVICE_CALLBACK.lock().unwrap();
+    if let Some(callback) = *cb_guard {
+        let cb = callback;
+        drop(cb_guard);
+        if let Ok(c_str) = CString::new(device_id) {
+            cb(c_str.as_ptr());
+        }
+    }
+}
+
 /// Sends connection state update to the registered callback
 fn notify_connection_state_change() {
     let cb_guard = CONNECTION_STATE_CALLBACK.lock().unwrap();
@@ -630,6 +658,7 @@ fn spawn_cluster_listener(session: &Session, generation: u64) -> Result<(), Stri
             match msg_result {
                 Ok(cluster_update) => {
                     if let Some(cluster) = cluster_update.cluster.into_option() {
+                        notify_active_device_id(&cluster.active_device_id);
                         if let Some(player_state) = cluster.player_state.into_option() {
                             send_playback_state(&player_state);
                             process_and_send_queue(player_state);

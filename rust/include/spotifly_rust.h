@@ -220,6 +220,15 @@ typedef void (*SetQueueCallback)(const char* set_queue_json);
 /// Called when the queue is set/modified (via set_queue command from mobile app).
 void spotifly_register_set_queue_callback(SetQueueCallback callback);
 
+/// Callback function type for active device change notifications.
+/// Receives the device ID string of the currently active Spotify Connect device.
+typedef void (*ActiveDeviceCallback)(const char* device_id);
+
+/// Registers a callback to receive active device ID changes from cluster updates.
+/// Called on every cluster update — use this to track which device is active
+/// without polling the Web API.
+void spotifly_register_active_device_callback(ActiveDeviceCallback callback);
+
 /// Callback function type for connection state change notifications.
 /// Receives a JSON string containing full connection state.
 typedef void (*ConnectionStateCallback)(const char* state_json);

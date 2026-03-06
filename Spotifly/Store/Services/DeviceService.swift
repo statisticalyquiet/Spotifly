@@ -24,6 +24,7 @@ final class DeviceService {
     /// into a single HTTP request.
     @ObservationIgnored private let loadSubject = PassthroughSubject<String, Never>()
     @ObservationIgnored private var loadCancellable: AnyCancellable?
+    @ObservationIgnored private var activeDeviceCancellable: AnyCancellable?
 
     init(store: AppStore) {
         self.store = store
@@ -31,6 +32,11 @@ final class DeviceService {
             .throttle(for: .seconds(10), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] token in
                 Task { await self?.loadDevices(accessToken: token) }
+            }
+        activeDeviceCancellable = SpotifyPlayer.activeDeviceChanged
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] deviceId in
+                self?.store.setActiveDevice(deviceId)
             }
     }
 
