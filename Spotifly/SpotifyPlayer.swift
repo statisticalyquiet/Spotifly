@@ -1018,6 +1018,14 @@ enum SpotifyPlayer {
         }
     }
 
+    /// Enables or disables shuffle on the local Spirc device.
+    /// Dispatched to background thread to avoid blocking the main thread on Spirc mutex.
+    static func setShuffle(_ enabled: Bool) {
+        Task.detached(priority: .userInitiated) {
+            spotifly_set_shuffle(enabled)
+        }
+    }
+
     /// Plays radio for a seed track.
     /// Dispatched to background thread as this blocks on a network request.
     /// - Parameter trackUri: The Spotify track URI to use as seed

@@ -315,6 +315,7 @@ final class QueueService {
                     durationMs: durationMs,
                     trackUri: state.item?.uri ?? queueResponse.currentlyPlaying?.uri,
                     timestampMs: state.timestamp ?? 0,
+                    shuffleEnabled: state.shuffleState ?? false,
                 )
             }
         } catch {

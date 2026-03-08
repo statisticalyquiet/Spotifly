@@ -229,6 +229,8 @@ struct NowPlayingBarView: View {
 
     private var playbackControls: some View {
         HStack(spacing: 16) {
+            shuffleButton
+
             Button {
                 playbackViewModel.previous()
             } label: {
@@ -259,6 +261,19 @@ struct NowPlayingBarView: View {
             .buttonStyle(.plain)
             .disabled(!playbackViewModel.hasNext)
         }
+    }
+
+    private var shuffleButton: some View {
+        Button {
+            playbackViewModel.toggleShuffle()
+        } label: {
+            Image(systemName: "shuffle")
+                .font(.caption)
+                .foregroundColor(playbackViewModel.isShuffleEnabled ? .green : .secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasPlayback)
+        .help(playbackViewModel.isShuffleEnabled ? "Disable shuffle" : "Enable shuffle")
     }
 
     /// Current playback position (interpolated for smooth display)

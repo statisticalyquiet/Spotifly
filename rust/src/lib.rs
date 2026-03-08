@@ -2,11 +2,11 @@ mod proxy_sink;
 
 use futures_util::StreamExt;
 use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
-use librespot_core::SessionConfig;
-use librespot_core::SpotifyUri;
 use librespot_core::cache::Cache;
 use librespot_core::config::DeviceType;
 use librespot_core::session::Session;
+use librespot_core::SessionConfig;
+use librespot_core::SpotifyUri;
 use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
 use librespot_playback::mixer::softmixer::SoftMixer;
 use librespot_playback::mixer::{Mixer, MixerConfig};
@@ -17,8 +17,8 @@ use log::debug;
 use once_cell::sync::Lazy;
 use proxy_sink::mk_proxy_sink;
 use serde::Serialize;
-use std::ffi::{CStr, CString, c_char};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
+use std::ffi::{c_char, CStr, CString};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime;
@@ -66,6 +66,9 @@ static ACTIVE_DEVICE_CALLBACK: Lazy<Mutex<Option<extern "C" fn(*const c_char)>>>
     Lazy::new(|| Mutex::new(None));
 static LAST_ACTIVE_DEVICE_ID: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 static LAST_VOLUME: AtomicU16 = AtomicU16::new(0);
+static SHUFFLE_STATE: AtomicBool = AtomicBool::new(false);
+static REPEAT_TRACK_STATE: AtomicBool = AtomicBool::new(false);
+static REPEAT_CONTEXT_STATE: AtomicBool = AtomicBool::new(false);
 
 // Token request callback - Rust requests fresh token from Swift for reconnection
 static TOKEN_REQUEST_CALLBACK: Lazy<Mutex<Option<extern "C" fn()>>> =
@@ -249,6 +252,20 @@ fn update_current_context_uri(context_uri: &str) {
     *context_guard = Some(context_uri.to_string());
 }
 
+fn update_playback_options(shuffle: bool, repeat_track: bool, repeat_context: bool) {
+    SHUFFLE_STATE.store(shuffle, Ordering::SeqCst);
+    REPEAT_TRACK_STATE.store(repeat_track, Ordering::SeqCst);
+    REPEAT_CONTEXT_STATE.store(repeat_context, Ordering::SeqCst);
+}
+
+fn current_playback_options() -> (bool, bool, bool) {
+    (
+        SHUFFLE_STATE.load(Ordering::SeqCst),
+        REPEAT_TRACK_STATE.load(Ordering::SeqCst),
+        REPEAT_CONTEXT_STATE.load(Ordering::SeqCst),
+    )
+}
+
 // Helper function to convert URL to URI
 fn url_to_uri(input: &str) -> String {
     // If already a URI, return as-is
@@ -406,9 +423,7 @@ pub extern "C" fn spotifly_register_set_queue_callback(callback: extern "C" fn(*
 /// Registers a callback to receive active device ID changes from cluster updates.
 /// Called on every cluster update with the current active device ID string.
 #[no_mangle]
-pub extern "C" fn spotifly_register_active_device_callback(
-    callback: extern "C" fn(*const c_char),
-) {
+pub extern "C" fn spotifly_register_active_device_callback(callback: extern "C" fn(*const c_char)) {
     let mut cb = ACTIVE_DEVICE_CALLBACK.lock().unwrap();
     *cb = Some(callback);
 }
@@ -1293,6 +1308,26 @@ async fn init_player_async(access_token: &str, activate_after_connect: bool) -> 
                             debug!("VolumeChanged event: {}", volume);
                             check_and_send_volume(volume as u32);
                         }
+                        Some(PlayerEvent::ShuffleChanged { shuffle }) => {
+                            debug!("PlayerEvent::ShuffleChanged: {}", shuffle);
+                            SHUFFLE_STATE.store(shuffle, Ordering::SeqCst);
+                            send_local_playback_state(
+                                IS_PLAYING.load(Ordering::SeqCst),
+                                POSITION_MS.load(Ordering::SeqCst),
+                            );
+                        }
+                        Some(PlayerEvent::RepeatChanged { context, track }) => {
+                            debug!(
+                                "PlayerEvent::RepeatChanged: context={}, track={}",
+                                context, track
+                            );
+                            REPEAT_CONTEXT_STATE.store(context, Ordering::SeqCst);
+                            REPEAT_TRACK_STATE.store(track, Ordering::SeqCst);
+                            send_local_playback_state(
+                                IS_PLAYING.load(Ordering::SeqCst),
+                                POSITION_MS.load(Ordering::SeqCst),
+                            );
+                        }
                         Some(PlayerEvent::Loading { track_id, position_ms, .. }) => {
                             let track_uri_str = track_id.to_string();
                             debug!("Loading event: {} at {}ms", track_uri_str, position_ms);
@@ -1521,7 +1556,11 @@ const ERROR_NOT_CONNECTED: i32 = -3;
 #[no_mangle]
 pub extern "C" fn spotifly_is_session_connected() -> i32 {
     let state = SESSION_CONNECTION_STATE.lock().unwrap();
-    if state.is_connected { 1 } else { 0 }
+    if state.is_connected {
+        1
+    } else {
+        0
+    }
 }
 
 /// Helper to check if session is connected. Returns ERROR_NOT_CONNECTED if not.
@@ -1581,6 +1620,7 @@ fn send_playback_state(player_state: &PlayerState) {
         let shuffle = options.map(|o| o.shuffling_context).unwrap_or(false);
         let repeat_track = options.map(|o| o.repeating_track).unwrap_or(false);
         let repeat_context = options.map(|o| o.repeating_context).unwrap_or(false);
+        update_playback_options(shuffle, repeat_track, repeat_context);
 
         let update = PlaybackStateUpdate {
             is_playing: player_state.is_playing,
@@ -1645,6 +1685,7 @@ fn send_local_playback_state(is_playing: bool, position_ms: u32) {
 
         // Get duration from local state
         let duration_ms = CURRENT_DURATION_MS.load(Ordering::SeqCst);
+        let (shuffle, repeat_track, repeat_context) = current_playback_options();
 
         let timestamp_ms = current_timestamp_ms() as i64;
 
@@ -1654,15 +1695,21 @@ fn send_local_playback_state(is_playing: bool, position_ms: u32) {
             track_uri,
             position_ms: position_ms as i64,
             duration_ms: duration_ms as i64,
-            shuffle: false, // TODO: track shuffle state locally if needed
-            repeat_track: false,
-            repeat_context: false,
+            shuffle,
+            repeat_track,
+            repeat_context,
             timestamp_ms,
         };
 
         debug!(
-            "Local PlaybackState: playing={}, paused={}, position={}ms, duration={}ms",
-            update.is_playing, update.is_paused, update.position_ms, update.duration_ms
+            "Local PlaybackState: playing={}, paused={}, position={}ms, duration={}ms, shuffle={}, repeat_track={}, repeat_context={}",
+            update.is_playing,
+            update.is_paused,
+            update.position_ms,
+            update.duration_ms,
+            update.shuffle,
+            update.repeat_track,
+            update.repeat_context
         );
 
         if let Ok(json) = serde_json::to_string(&update) {
@@ -2283,6 +2330,9 @@ pub extern "C" fn spotifly_cleanup() {
     // Reset state flags
     IS_PLAYING.store(false, Ordering::SeqCst);
     IS_ACTIVE_DEVICE.store(false, Ordering::SeqCst);
+    SHUFFLE_STATE.store(false, Ordering::SeqCst);
+    REPEAT_TRACK_STATE.store(false, Ordering::SeqCst);
+    REPEAT_CONTEXT_STATE.store(false, Ordering::SeqCst);
     POSITION_MS.store(0, Ordering::SeqCst);
     POSITION_TIMESTAMP_MS.store(0, Ordering::SeqCst);
     LAST_VOLUME.store(0, Ordering::SeqCst);
@@ -2569,6 +2619,34 @@ pub extern "C" fn spotifly_set_volume(volume: u16) -> i32 {
         },
         None => {
             debug!("Set volume error: Spirc not initialized");
+            ERROR_GENERAL
+        }
+    }
+}
+
+/// Sets shuffle mode on the current playback context.
+/// Returns 0 on success, -1 on error, -2 if channel closed (needs reinit).
+#[no_mangle]
+pub extern "C" fn spotifly_set_shuffle(enabled: bool) -> i32 {
+    debug!("spotifly_set_shuffle called: {}", enabled);
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
+    let spirc_guard = SPIRC.lock().unwrap();
+    match spirc_guard.as_ref() {
+        Some(spirc) => match spirc.shuffle(enabled) {
+            Ok(_) => 0,
+            Err(e) => {
+                debug!("Set shuffle error: {:?}", e);
+                if is_channel_closed_error(&e) {
+                    ERROR_NEEDS_REINIT
+                } else {
+                    ERROR_GENERAL
+                }
+            }
+        },
+        None => {
+            debug!("Set shuffle error: Spirc not initialized");
             ERROR_GENERAL
         }
     }

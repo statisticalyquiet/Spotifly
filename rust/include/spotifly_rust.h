@@ -290,6 +290,12 @@ int32_t spotifly_play_radio(const char* track_uri);
 /// @param volume Volume level (0 = muted, 65535 = max)
 int32_t spotifly_set_volume(uint16_t volume);
 
+/// Sets shuffle mode for the current playback context.
+/// Returns 0 on success, -1 on error, -2 if session disconnected.
+///
+/// @param enabled true to enable shuffle, false to disable it
+int32_t spotifly_set_shuffle(bool enabled);
+
 /// Transfers playback from another device to this local player.
 /// Uses the native Spotify Connect protocol via Spirc.
 /// Returns 0 on success, -1 on error.

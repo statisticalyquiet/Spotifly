@@ -87,6 +87,7 @@ final class PlaybackViewModel {
 
     /// Favorite status of currently playing track
     var isCurrentTrackFavorited = false
+    var isShuffleEnabled = false
 
     private var isInitialized = false
     private var lastAlbumArtURL: String?
@@ -399,6 +400,27 @@ final class PlaybackViewModel {
         updateNowPlayingPosition()
     }
 
+    func toggleShuffle() {
+        let targetShuffle = !isShuffleEnabled
+
+        if SpotifyPlayer.isActiveDevice {
+            guard SpotifyPlayer.isSessionConnected else {
+                debugLog("PlaybackViewModel", "toggleShuffle() ignored - session not connected yet")
+                return
+            }
+            SpotifyPlayer.setShuffle(targetShuffle)
+        } else {
+            Task {
+                guard let token = await tokenProvider?() else { return }
+                do {
+                    try await SpotifyAPI.setShuffle(accessToken: token, enabled: targetShuffle)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
     /// Returns true if there are tracks in the queue after the current track
     var hasNext: Bool {
         guard let store else { return false }
@@ -652,7 +674,7 @@ final class PlaybackViewModel {
 
         debugLog(
             "PlaybackViewModel",
-            "Playback state update: playing=\(state.isPlaying), paused=\(state.isPaused), position=\(state.positionMs)ms, duration=\(state.durationMs)ms, uri=\(state.trackUri)",
+            "Playback state update: playing=\(state.isPlaying), paused=\(state.isPaused), position=\(state.positionMs)ms, duration=\(state.durationMs)ms, shuffle=\(state.shuffle), uri=\(state.trackUri)",
         )
 
         // Update playing state
@@ -677,6 +699,8 @@ final class PlaybackViewModel {
         if state.durationMs > 0 {
             trackDurationMs = UInt32(state.durationMs)
         }
+
+        isShuffleEnabled = state.shuffle
 
         // Sync position anchor on state changes
         // When monitoring a remote device, position_ms is the position at timestamp_ms
@@ -716,14 +740,16 @@ final class PlaybackViewModel {
         durationMs: Int,
         trackUri: String?,
         timestampMs: Int64,
+        shuffleEnabled: Bool,
     ) {
         debugLog(
             "PlaybackViewModel",
-            "Applying Web API state: playing=\(isPlaying), progress=\(progressMs)ms, duration=\(durationMs)ms, uri=\(trackUri ?? "nil")",
+            "Applying Web API state: playing=\(isPlaying), progress=\(progressMs)ms, duration=\(durationMs)ms, shuffle=\(shuffleEnabled), uri=\(trackUri ?? "nil")",
         )
 
         // Update playing state
         self.isPlaying = isPlaying
+        isShuffleEnabled = shuffleEnabled
 
         // Update track if provided
         if let uri = trackUri, !uri.isEmpty {
