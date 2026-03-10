@@ -115,6 +115,24 @@ static CURRENT_DURATION_MS: AtomicU32 = AtomicU32::new(0);
 // Current track URI - for detecting same-track reconnects
 static CURRENT_TRACK_URI: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
+// Pending play - tracks an in-flight play command so the soft-reconnect watchdog can retry
+// it if the audio key fetch on the old session times out.
+// Cleared on: PlayerEvent::Playing (success), spotifly_stop/disconnect/shutdown/cleanup (canceled).
+// A new play command supersedes any previous one via a monotonically increasing request_id.
+#[derive(Clone)]
+enum PendingPlayRequest {
+    Uri(String, i32),  // (uri, track_index)
+    Tracks(String),    // track_uris_json
+    Radio(String),     // seed_track_uri — re-resolves playlist and seeks to seed on retry
+}
+#[derive(Clone)]
+struct PendingPlay {
+    request_id: u64,
+    request: PendingPlayRequest,
+}
+static PENDING_PLAY: Lazy<Mutex<Option<PendingPlay>>> = Lazy::new(|| Mutex::new(None));
+static PENDING_PLAY_SEQ: AtomicU64 = AtomicU64::new(0);
+
 // Current context URI - captured from SetQueue and cluster player state updates.
 // We keep the latest non-empty value to recover resume after reconnect.
 static CURRENT_CONTEXT_URI: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
@@ -250,6 +268,15 @@ fn update_current_context_uri(context_uri: &str) {
     }
     let mut context_guard = CURRENT_CONTEXT_URI.lock().unwrap();
     *context_guard = Some(context_uri.to_string());
+}
+
+fn set_pending_play(request: PendingPlayRequest) {
+    let request_id = PENDING_PLAY_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    *PENDING_PLAY.lock().unwrap() = Some(PendingPlay { request_id, request });
+}
+
+fn clear_pending_play() {
+    *PENDING_PLAY.lock().unwrap() = None;
 }
 
 fn update_playback_options(shuffle: bool, repeat_track: bool, repeat_context: bool) {
@@ -796,7 +823,48 @@ fn spawn_reconnection_loop() {
                     Ok(_) => {
                         debug!("[WAKE +{}ms] Soft reconnect successful on attempt {}", elapsed_since_wake_ms(), attempt + 1);
                         RECONNECTING.store(false, Ordering::SeqCst);
-                        // No auto-resume needed — the Player is still playing
+                        // The Player keeps playing existing audio during soft reconnect.
+                        // But if a new play command was issued right before the disconnect,
+                        // the audio key fetch on the old session will time out (~1.5s) and
+                        // librespot will silently fail (context unavailable on new Spirc).
+                        // Detect this: if the Playing event never fires within 3s, retry.
+                        let pending = PENDING_PLAY.lock().unwrap().clone();
+                        if let Some(p) = pending {
+                            debug!("[WAKE +{}ms] Soft reconnect: pending play detected (id={}), spawning watchdog", elapsed_since_wake_ms(), p.request_id);
+                            RUNTIME.spawn(async move {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                                // Only retry if this exact request is still pending.
+                                // A newer request_id means the user issued a new play (superseded).
+                                // None means Playing fired and cleared it (success) or stop was called.
+                                let still_id = PENDING_PLAY.lock().unwrap().as_ref().map(|s| s.request_id);
+                                if still_id == Some(p.request_id) {
+                                    // Don't clear before the call: if the re-issue fails
+                                    // (e.g. session flapped again), the pending play remains set
+                                    // and the next soft reconnect can try again.
+                                    let result = match &p.request {
+                                        PendingPlayRequest::Uri(uri, track_index) => {
+                                            debug!("Pending play watchdog: Playing never fired for {} (id={}), re-issuing play_uri", uri, p.request_id);
+                                            match std::ffi::CString::new(uri.as_str()) {
+                                                Ok(cstr) => spotifly_play_uri(cstr.as_ptr(), *track_index),
+                                                Err(_) => return,
+                                            }
+                                        }
+                                        PendingPlayRequest::Tracks(json) => {
+                                            debug!("Pending play watchdog: Playing never fired for tracks (id={}), re-issuing play_tracks", p.request_id);
+                                            match std::ffi::CString::new(json.as_str()) {
+                                                Ok(cstr) => spotifly_play_tracks(cstr.as_ptr()),
+                                                Err(_) => return,
+                                            }
+                                        }
+                                        PendingPlayRequest::Radio(seed_uri) => {
+                                            debug!("Pending play watchdog: Playing never fired for radio {} (id={}), re-issuing play_radio", seed_uri, p.request_id);
+                                            play_radio_async(&seed_uri).await
+                                        }
+                                    };
+                                    debug!("Pending play watchdog: re-issue result={} (id={})", result, p.request_id);
+                                }
+                            });
+                        }
                         return;
                     }
                     Err(e) => {
@@ -1214,6 +1282,8 @@ async fn init_player_async(access_token: &str, activate_after_connect: bool) -> 
                             PLAYING_EVENT_SEQ.fetch_add(1, Ordering::SeqCst);
                             // Clear auto-resume flag - we're already playing
                             RESUME_AFTER_RECONNECT_UNTIL_MS.store(0, Ordering::SeqCst);
+                            // Clear pending play - track started successfully
+                            clear_pending_play();
                             update_position(position_ms);
                             // Send playback state update to Swift
                             send_local_playback_state(true, position_ms);
@@ -1913,6 +1983,7 @@ pub extern "C" fn spotifly_play_tracks(track_uris_json: *const c_char) -> i32 {
                 Ok(_) => {
                     debug!("Spirc.load(tracks) succeeded");
                     IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                    set_pending_play(PendingPlayRequest::Tracks(track_uris_str.clone()));
                     0
                 }
                 Err(_e) => {
@@ -2012,6 +2083,7 @@ pub extern "C" fn spotifly_play_uri(uri_or_url: *const c_char, track_index: i32)
                     debug!("Spirc.load() succeeded");
                     IS_PLAYING.store(true, Ordering::SeqCst);
                     IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                    set_pending_play(PendingPlayRequest::Uri(uri_str.clone(), track_index));
                     0
                 }
                 Err(_e) => {
@@ -2035,6 +2107,10 @@ pub extern "C" fn spotifly_pause() -> i32 {
     if let Err(e) = require_session_connected() {
         return e;
     }
+    // Cancel any pending play — if the user pauses while a track is still loading,
+    // PlayerEvent::Playing will never fire, and a later soft-reconnect watchdog
+    // would otherwise replay something the user explicitly paused.
+    clear_pending_play();
     let spirc_guard = SPIRC.lock().unwrap();
     match spirc_guard.as_ref() {
         Some(spirc) => match spirc.pause() {
@@ -2212,6 +2288,8 @@ pub extern "C" fn spotifly_resume() -> i32 {
 #[no_mangle]
 pub extern "C" fn spotifly_stop() -> i32 {
     debug!("spotifly_stop called");
+    // Cancel any pending play so the soft-reconnect watchdog doesn't re-issue it
+    clear_pending_play();
     let player_guard = PLAYER.lock().unwrap();
     match player_guard.as_ref() {
         Some(player) => {
@@ -2234,6 +2312,7 @@ pub extern "C" fn spotifly_shutdown() -> i32 {
     debug!("spotifly_shutdown called");
     // Prevent reconnection attempts during intentional shutdown
     SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    clear_pending_play();
     let spirc_guard = SPIRC.lock().unwrap();
     if let Some(spirc) = spirc_guard.as_ref() {
         if spirc.shutdown().is_ok() {
@@ -2253,6 +2332,8 @@ pub extern "C" fn spotifly_disconnect() -> i32 {
     debug!("spotifly_disconnect called - disconnecting for sleep");
     // Set sleeping flag to prevent auto-reconnect when cluster listener ends
     SLEEPING.store(true, Ordering::SeqCst);
+    // Cancel any pending play - a play from before sleep must not replay on wake
+    clear_pending_play();
 
     let spirc_guard = SPIRC.lock().unwrap();
     if let Some(spirc) = spirc_guard.as_ref() {
@@ -2331,6 +2412,7 @@ pub extern "C" fn spotifly_cleanup() {
     IS_PLAYING.store(false, Ordering::SeqCst);
     IS_ACTIVE_DEVICE.store(false, Ordering::SeqCst);
     SHUFFLE_STATE.store(false, Ordering::SeqCst);
+    clear_pending_play();
     REPEAT_TRACK_STATE.store(false, Ordering::SeqCst);
     REPEAT_CONTEXT_STATE.store(false, Ordering::SeqCst);
     POSITION_MS.store(0, Ordering::SeqCst);
@@ -2489,6 +2571,94 @@ pub extern "C" fn spotifly_seek(position_ms: u32) -> i32 {
     }
 }
 
+/// Async core of radio playback. Safe to call from both sync (via block_on) and async contexts.
+async fn play_radio_async(uri_str: &str) -> i32 {
+    if let Err(e) = require_session_connected() {
+        return e;
+    }
+
+    let session = {
+        let guard = SESSION.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => s.clone(),
+            None => {
+                debug!("Play radio error: session not initialized");
+                return -1;
+            }
+        }
+    };
+
+    // Resolve the radio playlist URI
+    let playlist_uri: Result<String, String> = async {
+        let spotify_uri = parse_spotify_uri(uri_str)?;
+
+        let response = session
+            .spclient()
+            .get_radio_for_track(&spotify_uri)
+            .await
+            .map_err(|e| format!("Failed to get radio: {:?}", e))?;
+
+        let json: serde_json::Value = serde_json::from_slice(&response)
+            .map_err(|e| format!("Failed to parse radio response: {:?}", e))?;
+
+        // The API returns a playlist URI in mediaItems
+        // Format: { "mediaItems": [{ "uri": "spotify:playlist:xxx" }] }
+        json.get("mediaItems")
+            .and_then(|items| items.as_array())
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("uri"))
+            .and_then(|u| u.as_str())
+            .filter(|uri| uri.starts_with("spotify:playlist:"))
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No radio playlist found in response".to_string())
+    }
+    .await;
+
+    let playlist_uri = match playlist_uri {
+        Ok(uri) => uri,
+        Err(_e) => {
+            debug!("Play radio error: {}", _e);
+            return -1;
+        }
+    };
+
+    debug!("Loading radio playlist: {}", playlist_uri);
+
+    let spirc_guard = SPIRC.lock().unwrap();
+    match spirc_guard.as_ref() {
+        Some(spirc) => {
+            if let Err(e) = ensure_active_for_playback(spirc) {
+                return e;
+            }
+
+            let load_request = LoadRequest::from_context_uri(
+                playlist_uri.clone(),
+                LoadRequestOptions {
+                    start_playing: true,
+                    seek_to: 0,
+                    playing_track: Some(PlayingTrack::Uri(uri_str.to_string())),
+                    ..Default::default()
+                },
+            );
+            match spirc.load(load_request) {
+                Ok(_) => {
+                    IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
+                    set_pending_play(PendingPlayRequest::Radio(uri_str.to_string()));
+                    0
+                }
+                Err(_e) => {
+                    debug!("Play radio error: {:?}", _e);
+                    -1
+                }
+            }
+        }
+        None => {
+            debug!("Play radio error: Spirc not initialized");
+            -1
+        }
+    }
+}
+
 /// Plays radio for a seed track.
 /// Gets the radio playlist URI and loads it directly via Spirc.
 /// Returns 0 on success, -1 on error.
@@ -2511,89 +2681,7 @@ pub extern "C" fn spotifly_play_radio(track_uri: *const c_char) -> i32 {
 
     debug!("spotifly_play_radio called: {}", uri_str);
 
-    if let Err(e) = require_session_connected() {
-        return e;
-    }
-
-    let session_guard = SESSION.lock().unwrap();
-    let session = match session_guard.as_ref() {
-        Some(s) => s.clone(),
-        None => {
-            debug!("Play radio error: session not initialized");
-            return -1;
-        }
-    };
-    drop(session_guard);
-
-    // Get the radio playlist URI
-    let playlist_uri: Result<String, String> = RUNTIME.block_on(async {
-        let spotify_uri = parse_spotify_uri(&uri_str)?;
-
-        let response = session
-            .spclient()
-            .get_radio_for_track(&spotify_uri)
-            .await
-            .map_err(|e| format!("Failed to get radio: {:?}", e))?;
-
-        let json: serde_json::Value = serde_json::from_slice(&response)
-            .map_err(|e| format!("Failed to parse radio response: {:?}", e))?;
-
-        // The API returns a playlist URI in mediaItems
-        // Format: { "mediaItems": [{ "uri": "spotify:playlist:xxx" }] }
-        json.get("mediaItems")
-            .and_then(|items| items.as_array())
-            .and_then(|items| items.first())
-            .and_then(|item| item.get("uri"))
-            .and_then(|u| u.as_str())
-            .filter(|uri| uri.starts_with("spotify:playlist:"))
-            .map(|s| s.to_string())
-            .ok_or_else(|| "No radio playlist found in response".to_string())
-    });
-
-    let playlist_uri = match playlist_uri {
-        Ok(uri) => uri,
-        Err(_e) => {
-            debug!("Play radio error: {}", _e);
-            return -1;
-        }
-    };
-
-    debug!("Loading radio playlist: {}", playlist_uri);
-
-    // Load the radio playlist via Spirc
-    let spirc_guard = SPIRC.lock().unwrap();
-    match spirc_guard.as_ref() {
-        Some(spirc) => {
-            // Ensure device is active before loading
-            if let Err(e) = ensure_active_for_playback(spirc) {
-                return e;
-            }
-
-            let load_request = LoadRequest::from_context_uri(
-                playlist_uri,
-                LoadRequestOptions {
-                    start_playing: true,
-                    seek_to: 0,
-                    playing_track: Some(PlayingTrack::Uri(uri_str.clone())),
-                    ..Default::default()
-                },
-            );
-            match spirc.load(load_request) {
-                Ok(_) => {
-                    IS_ACTIVE_DEVICE.store(true, Ordering::SeqCst);
-                    0
-                }
-                Err(_e) => {
-                    debug!("Play radio error: {:?}", _e);
-                    -1
-                }
-            }
-        }
-        None => {
-            debug!("Play radio error: Spirc not initialized");
-            -1
-        }
-    }
+    RUNTIME.block_on(play_radio_async(&uri_str))
 }
 
 /// Sets the playback volume (0-65535).
