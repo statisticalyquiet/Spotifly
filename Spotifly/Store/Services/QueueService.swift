@@ -115,7 +115,7 @@ final class QueueService {
     /// Handle queue update from Spirc callback (Mercury protocol)
     private func handleQueueUpdate(_ queueState: QueueState?) {
         guard let state = queueState else {
-            store.setQueue(previous: [], current: nil, next: [])
+            debugLog("QueueService", "Queue callback was nil; keeping existing queue state")
             return
         }
 
