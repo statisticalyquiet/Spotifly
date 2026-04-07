@@ -85,8 +85,6 @@ final class PlaybackViewModel {
     /// The volume slider uses this for display when set.
     var remoteVolume: Double?
 
-    /// Favorite status of currently playing track
-    var isCurrentTrackFavorited = false
     var isShuffleEnabled = false
 
     private var isInitialized = false
@@ -150,6 +148,17 @@ final class PlaybackViewModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+        // Reset stale playback state — after reinit Rust has no track/context loaded.
+        // isPlaying must be false before updateNowPlayingPosition() so it writes rate=0.
+        // updateNowPlayingPosition() must be called before zeroing trackDurationMs because
+        // it guards on trackDurationMs > 0 and would silently no-op otherwise.
+        isPlaying = false
+        updateNowPlayingPosition()
+        currentTrackUri = nil
+        trackDurationMs = 0
+        currentPositionMs = 0
+        positionAnchorMs = 0
+        positionAnchorTime = CACurrentMediaTime()
         isLoading = false
     }
 
@@ -890,39 +899,34 @@ final class PlaybackViewModel {
 
     // MARK: - Favorite Management
 
-    func checkCurrentTrackFavoriteStatus(accessToken: String) async {
-        guard let uri = currentTrackUri, let trackId = SpotifyAPI.parseTrackURI(uri) else {
-            isCurrentTrackFavorited = false
-            return
-        }
-
-        do {
-            isCurrentTrackFavorited = try await SpotifyAPI.checkSavedTrack(
-                accessToken: accessToken,
-                trackId: trackId,
-            )
-        } catch {
-            #if DEBUG
-                print("Error checking favorite status: \(error)")
-            #endif
-            isCurrentTrackFavorited = false
-        }
-    }
-
+    /// Toggle favorite status for the currently playing track via the global store.
     func toggleCurrentTrackFavorite(accessToken: String) async {
-        guard let uri = currentTrackUri, let trackId = SpotifyAPI.parseTrackURI(uri) else {
-            return
+        guard let uri = currentTrackUri, let trackId = SpotifyAPI.parseTrackURI(uri),
+              let store
+        else { return }
+
+        let wasFavorite = store.isFavorite(trackId)
+
+        // Optimistic update
+        if wasFavorite {
+            store.removeTrackFromFavorites(trackId)
+        } else {
+            store.addTrackToFavorites(trackId)
         }
 
         do {
-            if isCurrentTrackFavorited {
+            if wasFavorite {
                 try await SpotifyAPI.removeSavedTrack(accessToken: accessToken, trackId: trackId)
-                isCurrentTrackFavorited = false
             } else {
                 try await SpotifyAPI.saveTrack(accessToken: accessToken, trackId: trackId)
-                isCurrentTrackFavorited = true
             }
         } catch {
+            // Rollback
+            if wasFavorite {
+                store.addTrackToFavorites(trackId)
+            } else {
+                store.removeTrackFromFavorites(trackId)
+            }
             errorMessage = error.localizedDescription
         }
     }

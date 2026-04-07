@@ -823,6 +823,22 @@ fn spawn_reconnection_loop() {
                     Ok(_) => {
                         debug!("[WAKE +{}ms] Soft reconnect successful on attempt {}", elapsed_since_wake_ms(), attempt + 1);
                         RECONNECTING.store(false, Ordering::SeqCst);
+
+                        // The new Spirc has no context — if we were mid-playlist it won't know
+                        // what track comes next and will stop when the current one ends.
+                        // Reload the context immediately so Spirc can advance through the playlist.
+                        // This causes a brief seek-to-position blip, which is better than stopping.
+                        if was_playing && was_active {
+                            let spirc = SPIRC.lock().unwrap().as_ref().cloned();
+                            if let Some(spirc) = spirc {
+                                debug!(
+                                    "[WAKE +{}ms] Soft reconnect: reloading context to restore Spirc queue",
+                                    elapsed_since_wake_ms()
+                                );
+                                resume_via_load(&spirc);
+                            }
+                        }
+
                         // The Player keeps playing existing audio during soft reconnect.
                         // But if a new play command was issued right before the disconnect,
                         // the audio key fetch on the old session will time out (~1.5s) and
